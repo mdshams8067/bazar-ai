@@ -1,0 +1,30 @@
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Databases (dev artifacts — never commit real data)
+backend/bazar.db
+backend/llm_cache.db
+*.db
+
+# Secrets
+backend/.env
+.env
+.env.local
+frontend/.env.local
+
+# Scraper venv + runtime logs (not source)
+scrapper/venv/
+scrapper/data/scraper.log
+
+# Frontend (added once frontend/ exists)
+frontend/node_modules/
+frontend/dist/
+
+# OS/editor
+.DS_Store
+
+# Claude Code local session state (not project source)
+.claude/
