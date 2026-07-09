@@ -11,6 +11,9 @@ This repo is being built in stages.
 
 Output: `backend/seed/seed_data.json`, the catalog the backend seeds its database from.
 
-## AI provider layer
+## Bazar Buddy, the AI shopping assistant
 
-`backend/core/llm.py` wraps the LLM call the shopping assistant is built on: Gemini as the primary provider, Groq as an automatic fallback on rate-limit errors, and a local SQLite cache so an identical prompt never costs a second API call. Both are free-tier — the fallback exists because Gemini's free tier caps out at 15 requests/minute.
+The differentiator: a function-calling agent, not a Q&A chatbot. Tell it what you're cooking ("morog polao for 6", "biryani under 1500 taka") and it interprets the request, matches ingredients against the real catalog, and fills your cart — substituting or honestly skipping whatever's out of stock.
+
+- **LLM layer** (`backend/core/llm.py`) — Gemini as the primary provider, Groq as an automatic fallback on rate-limit errors, and a local cache so an identical prompt never costs a second API call.
+- **Agent** (`backend/agent/`) — one LLM call per message turns free text into structured JSON (intent, dish, ingredients, quantities); everything after that — matching against the catalog, stock checks, substitutions, budget-fitting, the reply text — is deterministic code, not a second model call. The core design principle: the LLM decides *what* the customer wants, plain code decides the *facts* (price, stock, which real product).
