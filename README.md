@@ -17,3 +17,12 @@ The differentiator: a function-calling agent, not a Q&A chatbot. Tell it what yo
 
 - **LLM layer** (`backend/core/llm.py`) — Gemini as the primary provider, Groq as an automatic fallback on rate-limit errors, and a local cache so an identical prompt never costs a second API call.
 - **Agent** (`backend/agent/`) — one LLM call per message turns free text into structured JSON (intent, dish, ingredients, quantities); everything after that — matching against the catalog, stock checks, substitutions, budget-fitting, the reply text — is deterministic code, not a second model call. The core design principle: the LLM decides *what* the customer wants, plain code decides the *facts* (price, stock, which real product).
+
+## Backend
+
+FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in production / SQLite locally via one `DATABASE_URL` swap, Alembic migrations.
+
+- **Auth** — JWT bearer tokens, bcrypt password hashing (thread-pooled so it never blocks the async event loop).
+- **Products** — paginated listing, category filter, search.
+- **Cart** — add/update/remove, always re-validated against live stock.
+- **Orders** — checkout snapshots price and product name onto each order line (so order history stays readable even if a product's price or listing changes later), decrements stock, and clears the cart in one transaction.
