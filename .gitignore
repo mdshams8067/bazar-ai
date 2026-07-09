@@ -28,3 +28,6 @@ frontend/dist/
 
 # Claude Code local session state (not project source)
 .claude/
+
+# Stray duplicate of the root spec doc, not referenced by any code
+backend/core/llm_adaptation_prompt.md

@@ -2,7 +2,7 @@
 
 An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products.
 
-This repo is being built in stages; these first commits cover the product catalog.
+This repo is being built in stages.
 
 ## Data pipeline
 
@@ -10,3 +10,7 @@ This repo is being built in stages; these first commits cover the product catalo
 2. **Transform** — `scrapper/transform_to_seed.py` cleans the raw scrape into a ready-to-seed catalog: dedupes by product URL, parses unit/size out of each product name, and assigns stock levels (mostly randomized, with a few products deliberately forced out of stock to exercise the AI assistant's substitution logic later on). Bangla names are left blank — not scraped yet.
 
 Output: `backend/seed/seed_data.json`, the catalog the backend seeds its database from.
+
+## AI provider layer
+
+`backend/core/llm.py` wraps the LLM call the shopping assistant is built on: Gemini as the primary provider, Groq as an automatic fallback on rate-limit errors, and a local SQLite cache so an identical prompt never costs a second API call. Both are free-tier — the fallback exists because Gemini's free tier caps out at 15 requests/minute.
