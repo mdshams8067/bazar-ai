@@ -1,0 +1,116 @@
+@import 'tailwindcss';
+
+/*
+ * Fonts: both are the actual spec'd fonts, no substitution.
+ * - Changa One (body/UI text) — free on Google Fonts.
+ * - Cooper Hewitt (headings, bold) — NOT on Google Fonts, but it's a real
+ *   OFL-licensed release by the Smithsonian's Cooper Hewitt museum
+ *   (github.com/cooperhewitt/cooperhewitt-typeface). The repo only ships
+ *   UFO source, so the compiled webfonts here came from @fontsource/
+ *   cooper-hewitt (same OFL license, just pre-built woff2) and are
+ *   self-hosted below — no CDN/runtime dependency on that package.
+ */
+@font-face {
+  font-family: 'Changa One';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/changa-one-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Cooper Hewitt';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/cooper-hewitt-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Cooper Hewitt';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/cooper-hewitt-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Cooper Hewitt';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/fonts/cooper-hewitt-800.woff2') format('woff2');
+}
+
+@theme {
+  /* Brand palette — deep forest green primary, blue as a secondary/info
+     accent only, terracotta reserved for stock/substitution flags. */
+  --color-primary: #1f5c3f;
+  --color-primary-dark: #143d2a;
+  --color-primary-light: #eaf4ec;
+  --color-accent-blue: #2450a8;
+  --color-accent-blue-tint: #e7eefb;
+  --color-ink: #14161a;
+  --color-ink-muted: #4a4d52;
+  --color-paper: #ffffff;
+  --color-paper-warm: #f7f6f1;
+  --color-warning: #c7622a;
+  --color-warning-tint: #f9ece4;
+  --color-line: #e3e1da;
+
+  --font-heading: 'Cooper Hewitt', system-ui, sans-serif;
+  /* Changa One is opt-in via the `font-body` class (see body{} below for
+     why) — reserved for actual prose: hero/marketing copy, chat message
+     bubbles, empty-state lines. Never used below 15-16px, per the brief's
+     own legibility rule (it's a heavy display face). */
+  --font-body: 'Changa One', system-ui, sans-serif;
+  --font-dense: ui-sans-serif, system-ui, sans-serif;
+
+  /* One radius language, applied consistently: small on cards, sharp on
+     buttons/inputs — never the generic "everything is rounded-2xl" look. */
+  --radius-card: 0.375rem;
+  --radius-button: 0.125rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  /*
+   * Base default is the dense/system-sans font, NOT Changa One. Changa One
+   * is a heavy display face — great for the few genuine "body copy"
+   * moments the brief calls out by name (chat messages, hero/marketing
+   * copy, empty-state lines), actively illegible as a blanket default
+   * across dense UI chrome (product names in grids, cart/order line
+   * items, form inputs, sidebars — the vast majority of the app's text).
+   * Those specific prose contexts opt in via the `font-body` utility
+   * class instead of every dense list opting out via `font-dense`.
+   */
+  body {
+    margin: 0;
+    background: var(--color-paper-warm);
+    color: var(--color-ink);
+    font-family: var(--font-dense);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  button,
+  .font-heading {
+    font-family: var(--font-heading);
+    font-weight: 700;
+  }
+
+  /* Intentional focus states — the accent blue, not the browser default. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-blue);
+    outline-offset: 2px;
+  }
+}

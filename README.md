@@ -27,3 +27,27 @@ FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in pro
 - **Products** — paginated listing, category filter, search.
 - **Cart** — add/update/remove, always re-validated against live stock.
 - **Orders** — checkout snapshots price and product name onto each order line (so order history stays readable even if a product's price or listing changes later), decrements stock, and clears the cart in one transaction.
+
+## Frontend
+
+React + Vite + Tailwind, installable as a PWA. Product browsing, cart, checkout, order history, and a Bazar Buddy chat widget available from anywhere in the app.
+
+## Getting started
+
+**Backend**
+```bash
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # fill in GOOGLE_API_KEY at minimum
+alembic upgrade head
+python -m seed.seed_db
+uvicorn main:app --reload
+```
+
+**Frontend**
+```bash
+cd frontend
+npm install
+npm run dev
+```
