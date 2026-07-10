@@ -63,6 +63,24 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_TEXT_MODEL: str = "qwen/qwen3-32b"
 
+    # ── SSLCommerz (payment gateway) ──────────────────────────────────────
+    # Defaults are SSLCommerz's own publicly documented sandbox demo-store
+    # credentials — not a placeholder, a real working test account. No
+    # merchant registration is needed for sandbox use (only their live/
+    # production gateway requires a registered business account). Override
+    # in .env with your own sandbox or live credentials.
+    SSLCOMMERZ_STORE_ID: str = "testbox"
+    SSLCOMMERZ_STORE_PASSWORD: str = "qwerty"
+    SSLCOMMERZ_API_URL: str = "https://sandbox.sslcommerz.com/gwprocess/v4/api.php"
+    SSLCOMMERZ_VALIDATION_URL: str = "https://sandbox.sslcommerz.com/validator/api/validationserverAPI.php"
+    # Used to build the success/fail/cancel/IPN callback URLs SSLCommerz
+    # calls back on (must be reachable from SSLCommerz's servers, so this
+    # needs to be a public URL in production, not localhost).
+    BACKEND_URL: str = "http://localhost:8000"
+    # Used to build the URL the customer's browser lands back on after
+    # SSLCommerz finishes — the SPA, not this API.
+    FRONTEND_URL: str = "http://localhost:5173"
+
 
 settings = Settings()
 
@@ -77,3 +95,9 @@ GOOGLE_API_KEY = settings.GOOGLE_API_KEY
 GEMINI_TEXT_MODEL = settings.GEMINI_TEXT_MODEL
 GROQ_API_KEY = settings.GROQ_API_KEY
 GROQ_TEXT_MODEL = settings.GROQ_TEXT_MODEL
+SSLCOMMERZ_STORE_ID = settings.SSLCOMMERZ_STORE_ID
+SSLCOMMERZ_STORE_PASSWORD = settings.SSLCOMMERZ_STORE_PASSWORD
+SSLCOMMERZ_API_URL = settings.SSLCOMMERZ_API_URL
+SSLCOMMERZ_VALIDATION_URL = settings.SSLCOMMERZ_VALIDATION_URL
+BACKEND_URL = settings.BACKEND_URL
+FRONTEND_URL = settings.FRONTEND_URL

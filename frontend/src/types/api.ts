@@ -91,6 +91,7 @@ export interface Order {
   id: number
   status: OrderStatus
   total_bdt: number
+  payment_method: string | null
   created_at: string
   updated_at: string
   items: OrderItem[]

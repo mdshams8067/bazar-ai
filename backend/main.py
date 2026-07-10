@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from core.config import CORS_ORIGINS, ENV
 from core.database import Base, engine
-from routers import auth, cart, chat, orders, products
+from routers import auth, cart, chat, orders, payment, products
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ app.include_router(auth.router)
 app.include_router(products.router)
 app.include_router(cart.router)
 app.include_router(orders.router)
+app.include_router(payment.router)
 app.include_router(chat.router)
 
 

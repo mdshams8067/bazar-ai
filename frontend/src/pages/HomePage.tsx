@@ -121,7 +121,7 @@ export function HomePage() {
           <div>
             <p className="text-2xl" aria-hidden>🔒</p>
             <p className="font-heading mt-1 font-bold">Secure sandbox checkout</p>
-            <p className="text-sm text-ink-muted">bKash, cards, and cash on delivery.</p>
+            <p className="text-sm text-ink-muted">SSLCommerz (bKash, Nagad, cards), or cash on delivery.</p>
           </div>
         </div>
       </section>

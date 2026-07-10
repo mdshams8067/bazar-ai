@@ -1,46 +1,68 @@
 import { type FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createOrder } from '../api/orders'
+import { initSslcommerzPayment } from '../api/payment'
 import { ApiError } from '../api/client'
 import { Button } from '../components/common/Button'
 import { formatBdt } from '../lib/format'
 import { useCartStore } from '../store/cartStore'
+import type { Cart } from '../types/api'
 
-type PaymentMethod = 'bkash' | 'card' | 'cod'
-
-const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: string }[] = [
-  { id: 'bkash', label: 'bKash', icon: '📱' },
-  { id: 'card', label: 'Card', icon: '💳' },
-  { id: 'cod', label: 'Cash on delivery', icon: '💵' },
-]
+type PaymentChoice = 'sslcommerz' | 'cod'
 
 export function CheckoutPage() {
   const navigate = useNavigate()
   const cart = useCartStore((s) => s.cart)
   const setCart = useCartStore((s) => s.setCart)
 
-  const [method, setMethod] = useState<PaymentMethod>('bkash')
+  const [method, setMethod] = useState<PaymentChoice>('sslcommerz')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Set once an SSLCommerz order exists (pending, awaiting payment) — lets
+  // a failed gateway call be retried without placing a second order. COD
+  // never reaches this state: it navigates straight to the confirmation
+  // page once the order is created, no gateway round trip involved.
+  const [pendingOrderId, setPendingOrderId] = useState<number | null>(null)
+  // The cart is cleared as soon as the order is created, but the summary
+  // below must keep showing what was ordered (e.g. across a retry) —
+  // snapshot it at that moment instead of reading the (now-empty) live cart.
+  const [orderSummary, setOrderSummary] = useState<Cart | null>(null)
+  const summary = orderSummary ?? cart
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
     try {
-      // Checkout creating the Order IS the entire "payment" step from the
-      // backend's point of view — this sandbox payment UI is presentational
-      // only, there's no real gateway call behind it (see README).
+      if (pendingOrderId !== null) {
+        // Retrying a payment on an already-created SSLCommerz order.
+        const { gateway_url } = await initSslcommerzPayment(pendingOrderId)
+        window.location.href = gateway_url
+        return
+      }
+
+      if (method === 'cod') {
+        const order = await createOrder('cod')
+        setCart({ items: [], subtotal_bdt: 0, item_count: 0 })
+        navigate(`/order-confirmation/${order.id}`)
+        return
+      }
+
+      setOrderSummary(cart)
       const order = await createOrder()
+      setPendingOrderId(order.id)
       setCart({ items: [], subtotal_bdt: 0, item_count: 0 })
-      navigate(`/order-confirmation/${order.id}`)
+      const { gateway_url } = await initSslcommerzPayment(order.id)
+      // A real SSLCommerz-hosted page — a full browser redirect, not a
+      // route in this SPA, so window.location, not react-router's navigate.
+      window.location.href = gateway_url
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Could not place your order')
       setSubmitting(false)
     }
   }
 
-  if (!cart || cart.items.length === 0) {
+  if (!summary || (summary.items.length === 0 && pendingOrderId === null)) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         <p className="text-ink-muted">Your cart is empty — nothing to check out yet.</p>
@@ -69,39 +91,53 @@ export function CheckoutPage() {
         <section className="rounded-card border border-line bg-paper p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-heading font-bold text-ink">Payment</h2>
-            <span className="rounded-full bg-accent-blue-tint px-2 py-0.5 text-xs font-bold text-accent-blue">
-              Sandbox Payment
-            </span>
+            {method === 'sslcommerz' && (
+              <span className="rounded-full bg-accent-blue-tint px-2 py-0.5 text-xs font-bold text-accent-blue">
+                SSLCommerz Sandbox
+              </span>
+            )}
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {PAYMENT_METHODS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setMethod(m.id)}
-                className={`rounded-button border px-3 py-2.5 text-sm font-semibold ${
-                  method === m.id ? 'border-primary bg-primary-light text-primary-dark' : 'border-line text-ink'
-                }`}
-              >
-                <span className="mr-1" aria-hidden>{m.icon}</span>
-                {m.label}
-              </button>
-            ))}
-          </div>
-          {method === 'bkash' && (
-            <input placeholder="bKash number" className="mt-3 w-full rounded-button border border-line px-3 py-2 text-sm" />
+
+          {pendingOrderId !== null ? (
+            <p className="font-dense text-sm text-ink-muted">
+              Payment for order #{pendingOrderId} wasn't completed yet — retry below.
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMethod('sslcommerz')}
+                  className={`rounded-button border px-3 py-2.5 text-sm font-semibold ${
+                    method === 'sslcommerz' ? 'border-primary bg-primary-light text-primary-dark' : 'border-line text-ink'
+                  }`}
+                >
+                  <span className="mr-1" aria-hidden>💳</span>
+                  Pay online
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMethod('cod')}
+                  className={`rounded-button border px-3 py-2.5 text-sm font-semibold ${
+                    method === 'cod' ? 'border-primary bg-primary-light text-primary-dark' : 'border-line text-ink'
+                  }`}
+                >
+                  <span className="mr-1" aria-hidden>💵</span>
+                  Cash on delivery
+                </button>
+              </div>
+              <p className="font-dense mt-2 text-sm text-ink-muted">
+                {method === 'sslcommerz'
+                  ? "You'll be redirected to SSLCommerz's secure checkout to pay by bKash, Nagad, card, or bank — this is a real sandbox transaction (no real money moves)."
+                  : 'Pay in cash when your order arrives.'}
+              </p>
+            </>
           )}
-          {method === 'card' && (
-            <input placeholder="Card number" className="mt-3 w-full rounded-button border border-line px-3 py-2 text-sm" />
-          )}
-          <p className="mt-2 text-xs text-ink-muted">
-            This is a sandboxed checkout for demo purposes — no real charge is made.
-          </p>
         </section>
 
         <section className="rounded-card border border-line bg-paper p-4">
           <h2 className="font-heading mb-3 font-bold text-ink">Order summary</h2>
-          {cart.items.map((item) => (
+          {summary.items.map((item) => (
             <div key={item.id} className="flex justify-between py-1 text-sm">
               <span className="text-ink-muted">
                 {item.quantity} × {item.product.name_en}
@@ -111,14 +147,27 @@ export function CheckoutPage() {
           ))}
           <div className="mt-2 flex justify-between border-t border-line pt-2">
             <span className="font-heading font-bold text-ink">Total</span>
-            <span className="font-heading font-bold text-ink">{formatBdt(cart.subtotal_bdt)}</span>
+            <span className="font-heading font-bold text-ink">{formatBdt(summary.subtotal_bdt)}</span>
           </div>
         </section>
 
-        {error && <p className="text-sm text-warning">{error}</p>}
+        {error && (
+          <div className="font-dense text-sm text-warning">
+            {error}
+            {pendingOrderId !== null && <p className="mt-1 text-ink-muted">Your order is saved — retry when ready.</p>}
+          </div>
+        )}
 
         <Button type="submit" variant="primary" disabled={submitting} className="w-full !py-3 !text-base">
-          {submitting ? 'Placing order…' : `Place order — ${formatBdt(cart.subtotal_bdt)}`}
+          {submitting
+            ? method === 'cod' && pendingOrderId === null
+              ? 'Placing order…'
+              : 'Redirecting to payment…'
+            : pendingOrderId !== null
+              ? `Retry payment — ${formatBdt(summary.subtotal_bdt)}`
+              : method === 'cod'
+                ? `Place order (Cash on delivery) — ${formatBdt(summary.subtotal_bdt)}`
+                : `Pay with SSLCommerz — ${formatBdt(summary.subtotal_bdt)}`}
         </Button>
       </form>
     </div>

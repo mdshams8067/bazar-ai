@@ -5,7 +5,7 @@ import enum
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -30,6 +30,13 @@ class Order(Base):
         Enum(OrderStatus, native_enum=False), nullable=False, default=OrderStatus.pending
     )
     total_bdt: Mapped[float] = mapped_column(Numeric(10, 2, asdecimal=False), nullable=False)
+    # SSLCommerz transaction id we generated at payment-init — unique per
+    # payment attempt (not per order, since a failed attempt can be retried
+    # on the same still-pending order), used to match the async success/IPN
+    # callback back to this order and to reject a callback for a stale/
+    # mismatched transaction.
+    tran_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    payment_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

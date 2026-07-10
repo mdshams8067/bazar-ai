@@ -16,8 +16,8 @@ export function Footer() {
         </div>
         <div className="text-sm text-paper-warm/80">
           <p className="font-heading mb-2 font-bold text-white">Payments</p>
-          <p>bKash, Nagad, cards, and cash on delivery.</p>
-          <p className="mt-1 text-paper-warm/50">Checkout runs in sandbox mode for this demo.</p>
+          <p>bKash, Nagad, cards, and net banking via SSLCommerz, or cash on delivery.</p>
+          <p className="mt-1 text-paper-warm/50">Online checkout runs in SSLCommerz sandbox mode for this demo.</p>
         </div>
       </div>
       <div className="border-t border-white/10 px-4 py-4 text-center text-xs text-paper-warm/50">

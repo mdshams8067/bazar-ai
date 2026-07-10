@@ -27,6 +27,7 @@ FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in pro
 - **Products** — paginated listing, category filter, search.
 - **Cart** — add/update/remove, always re-validated against live stock.
 - **Orders** — checkout snapshots price and product name onto each order line (so order history stays readable even if a product's price or listing changes later), decrements stock, and clears the cart in one transaction.
+- **Payments** — SSLCommerz (sandbox) or cash on delivery, picked at checkout. Online payment redirects to SSLCommerz's real hosted checkout page and is only confirmed after a server-to-server validation call (`backend/routers/payment.py`) — never trusted from the browser redirect alone.
 
 ## Frontend
 

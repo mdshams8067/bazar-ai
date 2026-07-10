@@ -13,7 +13,7 @@ from models.cart_item import CartItem
 from models.order import Order, OrderStatus
 from models.order_item import OrderItem
 from models.user import User
-from schemas.order import OrderListRead, OrderRead, OrderStatusUpdate
+from schemas.order import OrderCreate, OrderListRead, OrderRead, OrderStatusUpdate
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -26,7 +26,9 @@ _NEXT_STATUS = {
 
 @router.post("", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
 async def create_order(
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
+    payload: OrderCreate | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Order:
     """Creates an order from the current cart: validates stock, snapshots
     price/name and decrements stock, clears the cart — all in one
@@ -55,7 +57,12 @@ async def create_order(
                 detail=f"Only {item.product.stock_qty} of {item.product.name_en} in stock",
             )
 
-    order = Order(user_id=current_user.id, status=OrderStatus.pending, total_bdt=0.0)
+    order = Order(
+        user_id=current_user.id,
+        status=OrderStatus.pending,
+        total_bdt=0.0,
+        payment_method=payload.payment_method if payload else None,
+    )
     db.add(order)
 
     total = 0.0

@@ -1,8 +1,14 @@
 import { apiRequest, buildQuery } from './client'
 import type { Order, OrderListResponse, OrderStatus } from '../types/api'
 
-export function createOrder(): Promise<Order> {
-  return apiRequest<Order>('/orders', { method: 'POST' })
+// Omitting paymentMethod means "pay via SSLCommerz" — the caller follows
+// up with a separate initSslcommerzPayment() call. "cod" needs no gateway
+// at all, so it's recorded directly on the order at creation.
+export function createOrder(paymentMethod?: 'cod'): Promise<Order> {
+  return apiRequest<Order>('/orders', {
+    method: 'POST',
+    body: paymentMethod ? { payment_method: paymentMethod } : undefined,
+  })
 }
 
 export function listOrders(page = 1, pageSize = 20): Promise<OrderListResponse> {
