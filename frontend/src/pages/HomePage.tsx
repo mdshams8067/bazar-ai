@@ -42,14 +42,13 @@ export function HomePage() {
       <section className="border-b border-line bg-primary-light">
         <div className="mx-auto flex max-w-6xl flex-col items-start gap-4 px-4 py-14 sm:py-20">
           <p className="font-heading rounded-full bg-white/60 px-3 py-1 text-xs font-bold text-primary-dark">
-            NEW · AI-assisted shopping
+            AI-assisted shopping
           </p>
           <h1 className="font-heading max-w-xl text-4xl font-extrabold leading-tight text-ink sm:text-5xl">
             Tell us what you're cooking. We'll sort out the rest.
           </h1>
           <p className="font-body max-w-lg text-lg text-ink-muted">
-            Bazar Buddy turns "morog polao for 6" into a full cart — matched against real stock,
-            with every substitution explained.
+            No more hunting through 12 categories for one recipe. Just tell us what you're making.
           </p>
           <div className="flex flex-wrap gap-3 pt-2">
             <Button variant="primary" onClick={openChat} className="!px-6 !py-3 !text-base">
@@ -120,7 +119,7 @@ export function HomePage() {
           </div>
           <div>
             <p className="text-2xl" aria-hidden>🔒</p>
-            <p className="font-heading mt-1 font-bold">Secure sandbox checkout</p>
+            <p className="font-heading mt-1 font-bold">Secure checkout</p>
             <p className="text-sm text-ink-muted">SSLCommerz (bKash, Nagad, cards), or cash on delivery.</p>
           </div>
         </div>

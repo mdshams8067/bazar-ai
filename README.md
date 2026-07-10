@@ -1,8 +1,6 @@
 # Bazar AI
 
-An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products.
-
-This repo is being built in stages.
+An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products. Inspired by Shwapno, built independently as a take-home project.
 
 ## Data pipeline
 
@@ -18,12 +16,6 @@ The differentiator: a function-calling agent, not a Q&A chatbot. Tell it what yo
 - **LLM layer** (`backend/core/llm.py`) — Gemini as the primary provider, Groq as an automatic fallback on rate-limit errors, and a local cache so an identical prompt never costs a second API call.
 - **Agent** (`backend/agent/`) — one LLM call per message turns free text into structured JSON (intent, dish, ingredients, quantities); everything after that — matching against the catalog, stock checks, substitutions, budget-fitting, the reply text — is deterministic code, not a second model call. The core design principle: the LLM decides *what* the customer wants, plain code decides the *facts* (price, stock, which real product).
 - **`POST /chat`** (`backend/routers/chat.py`) connects the two: runs the agent, then merges whatever it matched into the customer's real cart through the same code path the regular "add to cart" endpoint uses. Also handles cart-management requests — remove an item, empty the cart, keep only certain items, or swap one ingredient for another mid-conversation ("make it beef" after ordering chicken biryani) — all against the customer's actual cart, not the catalog.
-
-## Testing
-
-- Backend: `pytest` (unit/integration, mocked LLM calls — fast, runs on every change).
-- `python -m agent.test_agent` — single-turn acceptance test against the real LLM.
-- `python -m agent.test_conversations [--repeat N]` — multi-turn conversational eval suite against the real LLM, the real router, and a real cart: add→remove, add→clear, cook a dish→keep only one ingredient, cook a dish→swap an ingredient (two phrasings), and an off-topic fallback check. `--repeat` cycles through several phrasings of the same request per pass, since a single phrasing working once is weaker evidence than the same intent surviving several people's wording of it.
 
 ## Backend
 
@@ -58,3 +50,9 @@ cd frontend
 npm install
 npm run dev
 ```
+
+## Testing
+
+- Backend: `pytest` (unit/integration, mocked LLM calls — fast, runs on every change).
+- `python -m agent.test_agent` — single-turn acceptance test against the real LLM.
+- `python -m agent.test_conversations [--repeat N]` — multi-turn conversational eval suite against the real LLM, the real router, and a real cart: add→remove, add→clear, cook a dish→keep only one ingredient, cook a dish→swap an ingredient (two phrasings), and an off-topic fallback check. `--repeat` cycles through several phrasings of the same request per pass, since a single phrasing working once is weaker evidence than the same intent surviving several people's wording of it.

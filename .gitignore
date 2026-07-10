@@ -29,5 +29,11 @@ frontend/dist/
 # Claude Code local session state (not project source)
 .claude/
 
-# Stray duplicate of the root spec doc, not referenced by any code
+# Internal working notes — useful during development, not meant for the repo
+PROJECT_CONTEXT.md
 backend/core/llm_adaptation_prompt.md
+agent_implementation_prompt.md
+backend_crud_prompt.md
+frontend_build_prompt.md
+llm_adaptation_prompt.md
+scrapper/walkthrough.md

@@ -19,7 +19,13 @@ export function StatusTimeline({ status }: { status: OrderStatus }) {
                 i <= currentIndex ? 'bg-primary text-white' : 'bg-line text-ink-muted'
               }`}
             >
-              {step.icon}
+              {/* Emoji glyphs (✅ especially) carry their own baked-in color
+                  regardless of the container's text/background classes above
+                  — showing one for a step that hasn't been reached yet reads
+                  as "done" even though the circle itself is still muted.
+                  Only render the icon once a step is actually reached; show
+                  a plain step number otherwise. */}
+              {i <= currentIndex ? step.icon : i + 1}
             </div>
             <span
               className={`font-heading text-xs font-bold ${i <= currentIndex ? 'text-ink' : 'text-ink-muted'}`}
