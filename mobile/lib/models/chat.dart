@@ -5,6 +5,7 @@ enum MatchStatus {
   ok,
   substitutedBrand,
   substitutedFunctional,
+  substitutedDiy,
   skippedOptional,
   unavailableEssential,
   unmatched,
@@ -16,12 +17,29 @@ MatchStatus matchStatusFromJson(String v) => switch (v) {
       'ok' => MatchStatus.ok,
       'substituted_brand' => MatchStatus.substitutedBrand,
       'substituted_functional' => MatchStatus.substitutedFunctional,
+      'substituted_diy' => MatchStatus.substitutedDiy,
       'skipped_optional' => MatchStatus.skippedOptional,
       'unavailable_essential' => MatchStatus.unavailableEssential,
       'unmatched' => MatchStatus.unmatched,
       'needs_clarification' => MatchStatus.needsClarification,
       _ => MatchStatus.error,
     };
+
+/// One real product matched for a DIY substitute component — see
+/// IngredientMatch.components (only set for status substitutedDiy).
+class MatchComponent {
+  final Product product;
+  final double quantity;
+  final double lineTotal;
+
+  MatchComponent({required this.product, required this.quantity, required this.lineTotal});
+
+  factory MatchComponent.fromJson(Map<String, dynamic> json) => MatchComponent(
+        product: Product.fromJson(json['product'] as Map<String, dynamic>),
+        quantity: (json['quantity'] as num).toDouble(),
+        lineTotal: (json['line_total'] as num).toDouble(),
+      );
+}
 
 class IngredientMatch {
   final Product? product;
@@ -30,6 +48,7 @@ class IngredientMatch {
   final double lineTotal;
   final String? note;
   final List<Product>? candidates;
+  final List<MatchComponent>? components;
 
   IngredientMatch({
     this.product,
@@ -38,6 +57,7 @@ class IngredientMatch {
     required this.lineTotal,
     this.note,
     this.candidates,
+    this.components,
   });
 
   factory IngredientMatch.fromJson(Map<String, dynamic> json) => IngredientMatch(
@@ -48,6 +68,9 @@ class IngredientMatch {
         note: json['note'] as String?,
         candidates: json['candidates'] != null
             ? (json['candidates'] as List).map((e) => Product.fromJson(e as Map<String, dynamic>)).toList()
+            : null,
+        components: json['components'] != null
+            ? (json['components'] as List).map((e) => MatchComponent.fromJson(e as Map<String, dynamic>)).toList()
             : null,
       );
 }

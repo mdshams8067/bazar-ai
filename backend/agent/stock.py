@@ -1,10 +1,12 @@
 """
-agent/stock.py — Three-tier substitution when every matched candidate for an
+agent/stock.py — Substitution tiers when every matched candidate for an
 ingredient is out of stock.
 
-Tier 1 (brand):      same category + same search terms, different product, in stock.
+Tier 1 (brand):       same category + same search terms, different product, in stock.
 Tier 2 (functional):  LLM's substitute_hint searched as its own term, in stock.
-Tier 3 (skip/flag):  no substitute -> skip if optional, flag if essential.
+Tier 3 (DIY):         essential only — LLM's diy_substitute recipe, every
+                       component matched against the real catalog.
+Tier 4 (skip/flag):   no substitute -> skip if optional, flag if essential.
 """
 from __future__ import annotations
 
@@ -12,14 +14,65 @@ import logging
 
 from agent.matcher import (
     Match,
+    MatchComponent,
     ParsedIngredient,
     best_size_fit,
     fuzzy_match,
+    match_product,
     score_candidates,
 )
 from models.product import Product
 
 logger = logging.getLogger(__name__)
+
+
+def match_diy_substitute(ingredient: ParsedIngredient, catalog: list[Product]) -> Match | None:
+    """Tier 3: if the LLM proposed a DIY substitute recipe for this
+    essential, unavailable ingredient, try to match every component
+    against a real, in-stock catalog product. Requires ALL components to
+    match cleanly (plain "ok" or "substituted_brand" — never a further
+    substitution or an unmatched one): a partial substitute, e.g. finding
+    butter but not milk, doesn't actually let the customer make the
+    substitute, so that's treated as no substitute at all rather than
+    silently adding half a recipe. Returns None (not a Match) when there's
+    nothing to propose or the recipe doesn't fully pan out, so the caller
+    falls through to the honest unavailable_essential flag."""
+    if not ingredient.diy_substitute:
+        return None
+
+    components: list[MatchComponent] = []
+    descriptions: list[str] = []
+    for comp in ingredient.diy_substitute:
+        comp_ingredient = ParsedIngredient(
+            name_en=comp.name_en,
+            search_terms=comp.search_terms,
+            category_hint=comp.category_hint,
+            quantity=comp.quantity,
+            quantity_unit=comp.quantity_unit,
+            essential=True,
+        )
+        comp_match = match_product(comp_ingredient, catalog)
+        if comp_match.product is None or comp_match.status not in ("ok", "substituted_brand"):
+            logger.info(
+                f"[stock] DIY substitute for {ingredient.name_en} abandoned — "
+                f"component {comp.name_en} not available"
+            )
+            return None
+        components.append(
+            MatchComponent(product=comp_match.product, quantity=comp_match.quantity, line_total=comp_match.line_total)
+        )
+        descriptions.append(f"{comp_match.product.name_en} (x{comp_match.quantity:g})")
+
+    total = round(sum(c.line_total for c in components), 2)
+    logger.info(f"[stock] DIY substitute for {ingredient.name_en}: {', '.join(descriptions)}")
+    return Match(
+        product=None,
+        status="substituted_diy",
+        quantity=0.0,
+        line_total=total,
+        note=f"{ingredient.name_en} is unavailable — added {', '.join(descriptions)} so you can make a substitute at home",
+        components=components,
+    )
 
 
 def same_category_in_stock(
@@ -56,8 +109,8 @@ def search_category_in_stock(term: str, catalog: list[Product]) -> list[Product]
 def find_substitute(
     ingredient: ParsedIngredient, oos_candidates: list[Product], catalog: list[Product]
 ) -> Match:
-    """Runs the three substitution tiers in order for an ingredient whose
-    every matched candidate is out of stock."""
+    """Runs the substitution tiers in order for an ingredient whose every
+    matched candidate is out of stock."""
     oos_name = oos_candidates[0].name_en if oos_candidates else ingredient.name_en
 
     # TIER 1 — brand substitution.
@@ -87,7 +140,8 @@ def find_substitute(
                 note=f"{ingredient.name_en} is unavailable — added {product.name_en} as a cooking substitute (flavor may differ)",
             )
 
-    # TIER 3 — graceful skip (optional) or honest flag (essential).
+    # TIER 3 — skip if optional; if essential, try a DIY substitute recipe
+    # before giving up.
     if not ingredient.essential:
         logger.info(f"[stock] skipping optional out-of-stock ingredient: {ingredient.name_en}")
         return Match(
@@ -96,6 +150,11 @@ def find_substitute(
             note=f"{ingredient.name_en} is out of stock — it's optional for this dish, so I skipped it",
         )
 
+    diy_match = match_diy_substitute(ingredient, catalog)
+    if diy_match:
+        return diy_match
+
+    # TIER 4 — no substitute of any kind: honest flag.
     logger.info(f"[stock] essential ingredient unavailable: {ingredient.name_en}")
     return Match(
         product=None,

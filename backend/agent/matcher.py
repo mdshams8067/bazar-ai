@@ -32,6 +32,31 @@ _UNIT_BASE: dict[str, tuple[str, float]] = {
 
 
 @dataclass
+class SubstituteComponent:
+    """One raw ingredient the LLM proposes as part of a DIY substitute
+    recipe for an essential ingredient it expects might be unavailable
+    (e.g. butter + milk standing in for heavy cream). Same shape as the
+    relevant subset of ParsedIngredient — just enough to run through the
+    normal catalog matcher for each component."""
+
+    name_en: str
+    search_terms: list[str] = field(default_factory=list)
+    category_hint: str = "other"
+    quantity: float = 1.0
+    quantity_unit: str = "pcs"
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> SubstituteComponent:
+        return cls(
+            name_en=str(raw.get("name_en") or "item"),
+            search_terms=[str(t) for t in (raw.get("search_terms") or [])] or [str(raw.get("name_en") or "item")],
+            category_hint=str(raw.get("category_hint") or "other"),
+            quantity=_safe_float(raw.get("quantity"), default=1.0),
+            quantity_unit=str(raw.get("quantity_unit") or "pcs"),
+        )
+
+
+@dataclass
 class ParsedIngredient:
     """One ingredient entry from the LLM's structured output."""
 
@@ -43,12 +68,20 @@ class ParsedIngredient:
     quantity_stated: bool = False
     essential: bool = True
     substitute_hint: str | None = None
+    # Only meaningful when essential=True: a proposed DIY substitute recipe
+    # (2-4 raw ingredients) if this one turns out to be unavailable and no
+    # single-product substitute exists either. Proposed unconditionally by
+    # the LLM alongside substitute_hint — same pattern, just multi-product —
+    # and only ever used by the deterministic code as a last resort, after
+    # brand and functional substitution both fail. See agent/stock.py.
+    diy_substitute: list[SubstituteComponent] | None = None
 
     @classmethod
     def from_dict(cls, raw: dict) -> ParsedIngredient:
         """Builds a ParsedIngredient defensively — missing/odd fields fall
         back to sane defaults rather than raising, since the LLM's output
         shape can drift."""
+        diy_raw = raw.get("diy_substitute") or None
         return cls(
             name_en=str(raw.get("name_en") or "item"),
             search_terms=[str(t) for t in (raw.get("search_terms") or [])] or [str(raw.get("name_en") or "item")],
@@ -58,7 +91,20 @@ class ParsedIngredient:
             quantity_stated=bool(raw.get("quantity_stated", False)),
             essential=bool(raw.get("essential", True)),
             substitute_hint=raw.get("substitute_hint") or None,
+            diy_substitute=[SubstituteComponent.from_dict(c) for c in diy_raw] if diy_raw else None,
         )
+
+
+@dataclass
+class MatchComponent:
+    """One real product matched for a DIY substitute component — see
+    Match.components. quantity/line_total mirror Match's own fields but
+    scoped to just this component (a pack-size fit against its own need,
+    not the original missing ingredient's)."""
+
+    product: Product
+    quantity: float
+    line_total: float
 
 
 @dataclass
@@ -66,13 +112,17 @@ class Match:
     """Result of matching one ingredient to the catalog."""
 
     product: Product | None
-    status: str  # ok | substituted_brand | substituted_functional | skipped_optional | unavailable_essential | unmatched | error | needs_clarification
+    status: str  # ok | substituted_brand | substituted_functional | substituted_diy | skipped_optional | unavailable_essential | unmatched | error | needs_clarification
     quantity: float = 0.0
     line_total: float = 0.0
     note: str | None = None
     # Only set for status="needs_clarification" — the distinct pack-size
     # options the customer can pick from (see find_pack_size_options).
     candidates: list[Product] | None = None
+    # Only set for status="substituted_diy" — the real products standing in
+    # for a single unavailable ingredient (product is None in that case;
+    # line_total is the sum of these). See agent/stock.py's Tier 4.
+    components: list[MatchComponent] | None = None
 
 
 def _safe_float(value: object, default: float) -> float:
@@ -295,6 +345,16 @@ def match_product(ingredient: ParsedIngredient, catalog: list[Product]) -> Match
                 status="skipped_optional",
                 note=f"Couldn't find {ingredient.name_en} in our catalog — it's optional for this dish, so I skipped it",
             )
+        # Nothing in the catalog even loosely resembles this ingredient
+        # (as opposed to "found it, but every match is out of stock" below)
+        # — still worth trying a DIY substitute before giving up, since
+        # that's exactly the case for something like heavy cream, which
+        # isn't carried at all, not just out of stock.
+        from agent.stock import match_diy_substitute  # local import breaks the circular dependency
+
+        diy_match = match_diy_substitute(ingredient, catalog)
+        if diy_match:
+            return diy_match
         return Match(
             product=None,
             status="unmatched",

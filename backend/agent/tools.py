@@ -33,9 +33,30 @@ class CartAction:
 def build_cart_actions(matches: list[Match]) -> list[CartAction]:
     """Converts matches with a real product and non-zero quantity into cart
     actions. Skipped/unavailable ingredients (no product) produce no action —
-    the chat reply surfaces those via each Match's `note` instead."""
+    the chat reply surfaces those via each Match's `note` instead.
+
+    A "substituted_diy" match has no single product — it stands for a DIY
+    substitute recipe (see agent/stock.py) — so it contributes one action
+    per real component product instead of one action for the match itself."""
     actions = []
     for m in matches:
+        if m.status == "substituted_diy" and m.components:
+            for c in m.components:
+                actions.append(
+                    CartAction(
+                        product_id=c.product.id,
+                        name_en=c.product.name_en,
+                        unit=c.product.unit,
+                        unit_value=c.product.unit_value,
+                        unit_price=c.product.price_bdt,
+                        quantity=c.quantity,
+                        line_total=c.line_total,
+                        status=m.status,
+                        note=m.note,
+                    )
+                )
+            continue
+
         if m.status not in _ADDED_STATUSES or m.product is None or m.quantity <= 0:
             continue
         actions.append(

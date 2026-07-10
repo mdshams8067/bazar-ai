@@ -115,11 +115,18 @@ export type MatchStatus =
   | 'ok'
   | 'substituted_brand'
   | 'substituted_functional'
+  | 'substituted_diy'
   | 'skipped_optional'
   | 'unavailable_essential'
   | 'unmatched'
   | 'error'
   | 'needs_clarification'
+
+export interface MatchComponent {
+  product: Product
+  quantity: number
+  line_total: number
+}
 
 export interface IngredientMatch {
   product: Product | null
@@ -131,6 +138,10 @@ export interface IngredientMatch {
   // pick from (e.g. ketchup 250ml/500ml/1kg). Nothing is in the cart yet
   // for this ingredient; picking one adds it directly.
   candidates?: Product[] | null
+  // Only set for status "substituted_diy" — product is null in that case;
+  // these are the real products added instead (e.g. butter + milk standing
+  // in for heavy cream).
+  components?: MatchComponent[] | null
 }
 
 export interface ChatResponse {

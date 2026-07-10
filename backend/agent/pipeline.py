@@ -130,19 +130,29 @@ def _extract_json(text: str) -> dict:
     return json.loads(cleaned)
 
 
+# Recipes with several essential ingredients can each carry a diy_substitute
+# array (2-4 components) on top of their normal fields — comfortably past
+# llm.chat()'s 1024-token default for anything beyond a handful of
+# ingredients, which was silently truncating the JSON mid-string (a real
+# regression measured when this field was added, not a defensive guess).
+_MAX_OUTPUT_TOKENS = 2048
+
+
 async def _call_llm_for_json(user_message: str) -> dict:
     """Exactly one LLM call per message in the common case; a single
     re-prompt retry only fires if the first response fails to parse.
     Uses achat() (never the blocking chat()) since this runs inside an
     async def route — a blocking network call here would stall the event
     loop for every other concurrent request."""
-    raw = await llm.achat(SYSTEM_PROMPT, user_message, temperature=0.2)
+    raw = await llm.achat(SYSTEM_PROMPT, user_message, max_tokens=_MAX_OUTPUT_TOKENS, temperature=0.2)
     try:
         return _extract_json(raw)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"[pipeline] JSON parse failed, retrying once: {e}")
         retry_user = f"{user_message}\n\nPrevious response:\n{raw}\n\n{_JSON_RETRY_INSTRUCTION}"
-        raw_retry = await llm.achat(SYSTEM_PROMPT, retry_user, temperature=0.2, use_cache=False)
+        raw_retry = await llm.achat(
+            SYSTEM_PROMPT, retry_user, max_tokens=_MAX_OUTPUT_TOKENS, temperature=0.2, use_cache=False
+        )
         return _extract_json(raw_retry)  # a second failure propagates as-is
 
 
@@ -242,6 +252,18 @@ def _format_pack(unit: str, unit_value: float) -> str:
     return f"{value}{unit}"
 
 
+def _describe_match(m: Match) -> str:
+    """One-line description of what a match actually added, for the
+    explicit add_items/modify_dish confirmation. A "substituted_diy" match
+    has no single product — describe its components instead."""
+    if m.product:
+        return f"{m.product.name_en} ({_format_pack(m.product.unit, m.product.unit_value)}, x{m.quantity:g})"
+    if m.components:
+        parts = [f"{c.product.name_en} (x{c.quantity:g})" for c in m.components]
+        return f"{' + '.join(parts)} (substitute)"
+    return ""
+
+
 def _ensure_sentence(text: str) -> str:
     """Guarantees terminal punctuation so joined parts read as separate
     sentences instead of running into each other with no boundary."""
@@ -273,17 +295,16 @@ def _assemble_reply(parsed: ParsedRequest, matches: list[Match], totals: dict) -
 
     parts = [_ensure_sentence(parsed.reply_context)] if parsed.reply_context else []
 
-    added = [m for m in matches if m.product is not None]
+    # A "substituted_diy" match has no single product (see agent/stock.py)
+    # but did add real components to the cart, so it counts as "added" too.
+    added = [m for m in matches if m.product is not None or m.components]
     if parsed.intent in ("add_items", "modify_dish") and added:
         # Named-product requests deserve an explicit confirmation of the
         # exact real product + pack size matched — e.g. ketchup comes in
         # several genuinely different sizes, and the customer shouldn't
         # have to guess (or dig through the match cards) to find out
         # which one was actually added.
-        descriptions = [
-            f"{m.product.name_en} ({_format_pack(m.product.unit, m.product.unit_value)}, x{m.quantity:g})"
-            for m in added
-        ]
+        descriptions = [_describe_match(m) for m in added]
         parts.append(f"Added {', '.join(descriptions)} — subtotal ৳{totals['subtotal_bdt']:.2f}.")
     elif added:
         parts.append(f"Added {len(added)} item(s) to your cart — subtotal ৳{totals['subtotal_bdt']:.2f}.")

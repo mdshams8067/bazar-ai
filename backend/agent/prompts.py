@@ -50,10 +50,41 @@ OUTPUT SCHEMA:
       "essential": <boolean: false for garnish/optional items like kismis,
                     beresta topping, coriander garnish; true for items the
                     dish cannot be made without>,
-      "substitute_hint": <string or null: if this ingredient is commonly
-                          substituted, name the functional substitute
-                          category, e.g. ghee → "soybean oil". null if no
-                          reasonable substitute exists>
+      "substitute_hint": <string or null: a SINGLE searchable product
+                          category that could stand in for this ingredient
+                          as one product — e.g. ghee → "soybean oil".
+                          MUST be one thing a catalog search could actually
+                          find as one product. NEVER a compound phrase
+                          like "milk and butter" or "flour, baking powder,
+                          and salt" — if the real-world substitute is a
+                          combination of other ingredients rather than one
+                          swappable product, that ALWAYS goes in
+                          diy_substitute below instead, and this field
+                          stays null. null if no single-product substitute
+                          exists either.>,
+      "diy_substitute": <array or null: for essential ingredients with no
+                         single-product substitute (substitute_hint null)
+                         that CAN be approximated by combining 2-4 other
+                         basic grocery items — e.g. heavy cream: no direct
+                         substitute product exists, so substitute_hint is
+                         null, but butter + milk approximates it, so THIS
+                         field carries that combination. Never populate
+                         both substitute_hint and diy_substitute for the
+                         same ingredient — it's a single product OR a
+                         recipe of several, never both. null if there's no
+                         genuine combinable substitute either (e.g. a
+                         specific fish, a specific spice with no
+                         equivalent). Each entry: {"name_en": <string, e.g.
+                         "butter">, "search_terms": [<1-3 catalog search
+                         terms>], "category_hint": <same category enum as
+                         above>, "quantity": <number>, "quantity_unit":
+                         <"kg"|"gm"|"ltr"|"ml"|"pcs">} — scaled for the
+                         SAME serving size as the ingredient it's
+                         replacing. Proposed proactively alongside every
+                         essential ingredient that qualifies, whether or
+                         not it turns out to be unavailable — a separate
+                         system only uses it as a last resort, after
+                         checking the real catalog and stock first.>
     }
   ],
   "remove_ingredients": [
@@ -79,6 +110,13 @@ OUTPUT SCHEMA:
 }
 
 RULES:
+- diy_substitute components must be plain, common grocery staples likely
+  to exist in a Bangladeshi grocery catalog under a generic name (butter,
+  milk, yogurt, lemon, vinegar, flour, sugar, baking powder, etc.) — the
+  kind of thing a separate system can actually look up and buy, not a
+  vague or exotic substitute it has no hope of matching. If you can't
+  think of a genuine, commonly-known combination, use null rather than
+  guessing.
 - Ingredient quantities must scale with servings. Base your quantities on
   standard Bangladeshi home cooking proportions (e.g., morog polao for 4:
   ~500gm chinigura/aromatic rice, ~1kg chicken, ~150ml oil or ghee, 2-3

@@ -56,6 +56,12 @@ class ChatRequest(BaseModel):
     history: list[ChatHistoryTurn] = []
 
 
+class MatchComponentRead(BaseModel):
+    product: ProductRead
+    quantity: float
+    line_total: float
+
+
 class MatchRead(BaseModel):
     product: ProductRead | None
     status: str
@@ -67,6 +73,10 @@ class MatchRead(BaseModel):
     # find_pack_size_options). The frontend renders these as buttons;
     # nothing is added to the cart until one is picked.
     candidates: list[ProductRead] | None = None
+    # Only set for status="substituted_diy" — product is None in that case;
+    # these are the real products standing in for it (see agent/stock.py's
+    # Tier 3 DIY substitute matching).
+    components: list[MatchComponentRead] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -95,6 +105,14 @@ def _match_to_read(m: Match) -> MatchRead:
         line_total=m.line_total,
         note=m.note,
         candidates=[ProductRead.model_validate(p) for p in m.candidates] if m.candidates else None,
+        components=(
+            [
+                MatchComponentRead(product=ProductRead.model_validate(c.product), quantity=c.quantity, line_total=c.line_total)
+                for c in m.components
+            ]
+            if m.components
+            else None
+        ),
     )
 
 
@@ -269,10 +287,25 @@ async def chat(
     # Merge matched products into the user's real cart. Each upsert is
     # defensive on its own — one conflict (e.g. two ingredients resolving
     # to the same product and together exceeding stock) shouldn't drop the
-    # rest of an otherwise-successful cart update.
+    # rest of an otherwise-successful cart update. A "substituted_diy"
+    # match has no single product (see agent/stock.py) — it merges each
+    # real component product instead.
     conflict_notes: list[str] = []
     for m in result.matches:
-        if m.status in _ADDED_STATUSES and m.product is not None and m.quantity > 0:
+        if m.status == "substituted_diy" and m.components:
+            for c in m.components:
+                try:
+                    await upsert_cart_item(
+                        db,
+                        user_id=current_user.id,
+                        product_id=c.product.id,
+                        quantity=int(c.quantity),
+                        added_via=AddedVia.assistant,
+                        substitution_note=m.note,
+                    )
+                except HTTPException as e:
+                    conflict_notes.append(str(e.detail))
+        elif m.status in _ADDED_STATUSES and m.product is not None and m.quantity > 0:
             try:
                 await upsert_cart_item(
                     db,

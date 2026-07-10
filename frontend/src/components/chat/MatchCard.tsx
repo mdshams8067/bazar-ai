@@ -12,6 +12,7 @@ const STATUS_TAG: Record<
   ok: { label: 'Added', tone: 'primary', icon: '✅' },
   substituted_brand: { label: 'Brand swap', tone: 'blue', icon: '🔁' },
   substituted_functional: { label: 'Substitute', tone: 'warning', icon: '⚠️' },
+  substituted_diy: { label: 'DIY substitute', tone: 'blue', icon: '🧪' },
   skipped_optional: { label: 'Skipped (optional)', tone: 'muted', icon: '➖' },
   unavailable_essential: { label: "Couldn't fulfil", tone: 'warning', icon: '⚠️' },
   unmatched: { label: 'Not found', tone: 'muted', icon: '➖' },
@@ -22,6 +23,10 @@ const STATUS_TAG: Record<
 export function MatchCard({ match }: { match: IngredientMatch }) {
   if (match.status === 'needs_clarification' && match.candidates?.length) {
     return <PackSizePicker match={match} />
+  }
+
+  if (match.status === 'substituted_diy' && match.components?.length) {
+    return <DiySubstituteCard match={match} />
   }
 
   const tag = STATUS_TAG[match.status]
@@ -47,6 +52,40 @@ export function MatchCard({ match }: { match: IngredientMatch }) {
           )}
         </div>
         {match.note && <p className="mt-1 text-xs leading-snug text-ink-muted">{match.note}</p>}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * An essential ingredient with no direct substitute product (e.g. heavy
+ * cream) — Bazar Buddy already added the real components that approximate
+ * it (e.g. butter + milk) to the cart; this just shows what and why.
+ */
+function DiySubstituteCard({ match }: { match: IngredientMatch }) {
+  const tag = STATUS_TAG.substituted_diy
+  return (
+    <div className="rounded-card border border-line bg-paper p-2.5 font-dense">
+      <div className="flex items-center gap-2">
+        <Badge tone={tag.tone}>
+          {tag.icon} {tag.label}
+        </Badge>
+      </div>
+      {match.note && <p className="mt-1.5 text-xs leading-snug text-ink-muted">{match.note}</p>}
+      <div className="mt-2 space-y-1.5">
+        {match.components!.map((c) => (
+          <div key={c.product.id} className="flex items-center gap-2">
+            <div className="h-8 w-8 shrink-0 overflow-hidden rounded-button bg-paper-warm">
+              {c.product.image_url && (
+                <img src={c.product.image_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+              )}
+            </div>
+            <p className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">{c.product.name_en}</p>
+            <span className="shrink-0 text-xs text-ink-muted">
+              {formatPack(c.product.unit, c.product.unit_value)} · {formatBdt(c.product.price_bdt)}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   )
