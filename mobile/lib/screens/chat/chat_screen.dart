@@ -6,6 +6,7 @@ import '../../models/chat.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/cart_provider.dart';
 import '../../providers/chat_widget_provider.dart';
+import '../../routes/app_router.dart';
 import '../../services/chat_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/chat/chat_message_bubble.dart';
@@ -14,17 +15,22 @@ import '../../widgets/chat/typing_indicator.dart';
 const _maxHistoryMessages = 6;
 const _uuid = Uuid();
 
-class ChatPanel extends StatefulWidget {
-  const ChatPanel({super.key});
+/// A full screen rather than a floating panel — a fixed-size overlay sat
+/// outside any Scaffold, so the keyboard covered it instead of resizing
+/// around it. A real Scaffold gets keyboard-avoidance for free, and gives
+/// match cards/pack-size pickers room to actually be readable.
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
 
   @override
-  State<ChatPanel> createState() => _ChatPanelState();
+  State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatPanelState extends State<ChatPanel> {
+class _ChatScreenState extends State<ChatScreen> {
   final _chatService = ChatService();
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
+  ChatWidgetProvider? _chatVisibility;
 
   final List<ChatMessageEntry> _messages = [
     ChatMessageEntry(
@@ -40,7 +46,14 @@ class _ChatPanelState extends State<ChatPanel> {
   String _lastServingUnit = 'people';
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _chatVisibility ??= context.read<ChatWidgetProvider>()..hide();
+  }
+
+  @override
   void dispose() {
+    _chatVisibility?.show();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
@@ -102,26 +115,18 @@ class _ChatPanelState extends State<ChatPanel> {
     final auth = context.watch<AuthProvider>();
     final showQuickReplies = !_isSending && (_lastIntent == 'cook_dish' || _lastIntent == 'budget_dish');
 
-    return Positioned(
-      right: 16,
-      bottom: 16,
-      child: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(AppColors.radiusCard),
-        child: Container(
-          width: 340,
-          height: 520,
+    return Scaffold(
+      // White, not the app's usual paperWarm page background — assistant
+      // bubbles are paperWarm themselves (matching the web app's chat
+      // panel), so without this contrast they'd be invisible.
+      backgroundColor: AppColors.paper,
+      appBar: AppBar(title: const Text('Bazar Buddy')),
+      body: SafeArea(
+        child: Padding(
           padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: AppColors.paper, borderRadius: BorderRadius.circular(AppColors.radiusCard)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  const Expanded(child: Text('Bazar Buddy', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => context.read<ChatWidgetProvider>().close()),
-                ],
-              ),
               Expanded(
                 child: ListView.builder(
                   controller: _scrollCtrl,
@@ -155,7 +160,7 @@ class _ChatPanelState extends State<ChatPanel> {
                       child: TextField(
                         controller: _inputCtrl,
                         enabled: !_isSending,
-                        decoration: const InputDecoration(hintText: "morog polao banabo… or just ask in English", isDense: true),
+                        decoration: const InputDecoration(hintText: 'Ask Bazar Buddy…', isDense: true),
                         onSubmitted: _send,
                       ),
                     ),
@@ -173,10 +178,7 @@ class _ChatPanelState extends State<ChatPanel> {
                     children: [
                       const Text('Sign in to start shopping with Bazar Buddy.', textAlign: TextAlign.center),
                       TextButton(
-                        onPressed: () {
-                          context.read<ChatWidgetProvider>().close();
-                          context.go('/login?redirect=${Uri.encodeComponent('/')}');
-                        },
+                        onPressed: () => context.push('/login?redirect=${Uri.encodeComponent('/chat')}'),
                         child: const Text('Sign in'),
                       ),
                     ],
@@ -195,12 +197,13 @@ class ChatLauncherButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final inset = context.watch<ChatWidgetProvider>().bottomInset;
     return Positioned(
       right: 16,
-      bottom: 16,
+      bottom: 16 + inset,
       child: FloatingActionButton(
         backgroundColor: AppColors.primary,
-        onPressed: () => context.read<ChatWidgetProvider>().open(),
+        onPressed: () => rootNavigatorKey.currentContext?.push('/chat'),
         child: const Text('💬', style: TextStyle(fontSize: 22)),
       ),
     );

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../../providers/chat_widget_provider.dart';
 
 /// The backend's SSLCommerz success/fail/cancel callbacks 303-redirect to
 /// `{FRONTEND_URL}/order-confirmation/{id}?payment=...` — a web URL, since
@@ -16,6 +18,26 @@ class PaymentWebViewScreen extends StatefulWidget {
 
   @override
   State<PaymentWebViewScreen> createState() => _PaymentWebViewScreenState();
+}
+
+/// Pushes the payment WebView while it's on screen, hiding the floating
+/// chat launcher — a third-party gateway page has no business showing it.
+/// Wrapped around the push itself (rather than the screen's own
+/// initState/dispose) because this screen is pushed imperatively onto the
+/// same Navigator go_router's `.go()` later replaces on completion; that
+/// replacement isn't guaranteed to run this screen's dispose() promptly
+/// (or at all, in the same frame), which left the launcher stuck hidden
+/// when hide/show lived there instead.
+Future<String?> openPaymentGateway(BuildContext context, {required String gatewayUrl, required int orderId}) async {
+  final chatVisibility = context.read<ChatWidgetProvider>();
+  chatVisibility.hide();
+  try {
+    return await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => PaymentWebViewScreen(gatewayUrl: gatewayUrl, orderId: orderId)),
+    );
+  } finally {
+    chatVisibility.show();
+  }
 }
 
 class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {

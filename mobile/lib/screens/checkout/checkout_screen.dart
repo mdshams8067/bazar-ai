@@ -77,9 +77,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Future<void> _openGateway(String url, int orderId) async {
-    final result = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => PaymentWebViewScreen(gatewayUrl: url, orderId: orderId)),
-    );
+    final result = await openPaymentGateway(context, gatewayUrl: url, orderId: orderId);
     if (mounted && result != null) {
       context.go('/order-confirmation/$orderId?payment=$result');
     }

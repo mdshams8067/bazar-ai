@@ -48,9 +48,7 @@ class _OrderConfirmationScreenState extends State<OrderConfirmationScreen> {
     try {
       final url = await _paymentService.initSslcommerz(widget.orderId);
       if (!mounted) return;
-      final result = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (_) => PaymentWebViewScreen(gatewayUrl: url, orderId: widget.orderId)),
-      );
+      final result = await openPaymentGateway(context, gatewayUrl: url, orderId: widget.orderId);
       if (mounted && result != null) {
         context.go('/order-confirmation/${widget.orderId}?payment=$result');
         _load();

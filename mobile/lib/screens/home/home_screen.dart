@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/chat_widget_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/layout/app_header.dart';
 import '../../widgets/product/category_grid.dart';
@@ -29,7 +28,7 @@ class HomeScreen extends StatelessWidget {
                 const Text("We'll sort out the rest.", style: proseTextStyle),
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: () => context.read<ChatWidgetProvider>().open(),
+                  onPressed: () => context.push('/chat'),
                   child: const Text('💬 Tell Bazar Buddy what you\'re cooking'),
                 ),
                 const SizedBox(height: 8),

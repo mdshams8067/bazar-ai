@@ -1,9 +1,11 @@
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
 import '../screens/account/account_screen.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/auth/signup_screen.dart';
 import '../screens/cart/cart_screen.dart';
+import '../screens/chat/chat_screen.dart';
 import '../screens/checkout/checkout_screen.dart';
 import '../screens/home/home_screen.dart';
 import '../screens/orders/order_confirmation_screen.dart';
@@ -14,8 +16,15 @@ import '../screens/products/products_screen.dart';
 
 const _authGatedPaths = ['/cart', '/checkout', '/orders', '/account'];
 
+// The floating chat launcher (app.dart) is mounted as a sibling of the
+// routed page, not a descendant of it, so BuildContext.push from inside it
+// can't find GoRouter in its own ancestry. This key gives it a context that
+// genuinely sits inside the router's Navigator, so it can navigate anyway.
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 GoRouter buildRouter(AuthProvider auth) {
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     refreshListenable: auth,
     initialLocation: '/',
     redirect: (context, state) {
@@ -49,6 +58,7 @@ GoRouter buildRouter(AuthProvider auth) {
         builder: (context, state) => ProductDetailScreen(productId: int.parse(state.pathParameters['id']!)),
       ),
       GoRoute(path: '/cart', builder: (context, state) => const CartScreen()),
+      GoRoute(path: '/chat', builder: (context, state) => const ChatScreen()),
       GoRoute(path: '/checkout', builder: (context, state) => const CheckoutScreen()),
       GoRoute(
         path: '/order-confirmation/:id',

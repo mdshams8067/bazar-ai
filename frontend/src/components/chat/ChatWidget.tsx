@@ -160,7 +160,7 @@ export function ChatWidget() {
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="morog polao banabo… or just ask in English"
+                  placeholder="Ask Bazar Buddy…"
                   disabled={isSending}
                   className="flex-1 rounded-button border border-line px-3 py-2 text-base focus-visible:border-primary"
                 />

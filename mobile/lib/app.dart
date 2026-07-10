@@ -5,7 +5,7 @@ import 'providers/cart_provider.dart';
 import 'providers/chat_widget_provider.dart';
 import 'providers/products_provider.dart';
 import 'routes/app_router.dart';
-import 'screens/chat/chat_panel.dart';
+import 'screens/chat/chat_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/common/cold_start_banner.dart';
 
@@ -39,7 +39,7 @@ class BazarAiApp extends StatelessWidget {
                     child: Stack(
                       children: [
                         if (child != null) child,
-                        if (chatWidget.isOpen) const ChatPanel() else const ChatLauncherButton(),
+                        if (!chatWidget.hidden) const ChatLauncherButton(),
                       ],
                     ),
                   ),

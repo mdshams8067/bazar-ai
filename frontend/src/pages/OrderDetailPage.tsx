@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { advanceOrderStatus, getOrder, NEXT_ORDER_STATUS } from '../api/orders'
-import { Button } from '../components/common/Button'
+import { getOrder } from '../api/orders'
 import { StatusTimeline } from '../components/order/StatusTimeline'
 import { formatBdt } from '../lib/format'
 import type { Order } from '../types/api'
@@ -10,7 +9,6 @@ export function OrderDetailPage() {
   const { id } = useParams()
   const [order, setOrder] = useState<Order | null>(null)
   const [notFound, setNotFound] = useState(false)
-  const [advancing, setAdvancing] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -18,18 +16,6 @@ export function OrderDetailPage() {
       .then(setOrder)
       .catch(() => setNotFound(true))
   }, [id])
-
-  async function handleAdvance() {
-    if (!order) return
-    const next = NEXT_ORDER_STATUS[order.status]
-    if (!next) return
-    setAdvancing(true)
-    try {
-      setOrder(await advanceOrderStatus(order.id, next))
-    } finally {
-      setAdvancing(false)
-    }
-  }
 
   if (notFound) {
     return (
@@ -46,8 +32,6 @@ export function OrderDetailPage() {
     return <div className="mx-auto max-w-2xl px-4 py-16 text-center text-ink-muted">Loading order…</div>
   }
 
-  const next = NEXT_ORDER_STATUS[order.status]
-
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
       <Link to="/orders" className="text-sm font-semibold text-primary">
@@ -58,14 +42,6 @@ export function OrderDetailPage() {
 
       <div className="mt-6 rounded-card border border-line bg-paper p-5">
         <StatusTimeline status={order.status} />
-        {next && (
-          <div className="mt-4 text-center">
-            <Button variant="secondary" onClick={handleAdvance} disabled={advancing}>
-              {advancing ? 'Updating…' : `Simulate: mark as ${next}`}
-            </Button>
-            <p className="mt-1 text-xs text-ink-muted">Demo control — not wired to a real courier.</p>
-          </div>
-        )}
       </div>
 
       <div className="mt-6 rounded-card border border-line bg-paper p-4">

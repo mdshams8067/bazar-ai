@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../providers/cart_provider.dart';
+import '../../providers/chat_widget_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/common/empty_state.dart';
 import '../../widgets/cart/cart_line_item.dart';
 import '../../widgets/layout/app_header.dart';
 import '../../widgets/product/product_card.dart';
+
+// Reserves space above the sticky "Proceed to checkout" bar so the
+// floating Bazar Buddy launcher floats above it instead of covering it.
+const _bottomBarReserve = 88.0;
 
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
@@ -19,7 +24,17 @@ class _CartScreenState extends State<CartScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<CartProvider>().refresh());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<CartProvider>().refresh();
+      context.read<ChatWidgetProvider>().setBottomInset(_bottomBarReserve);
+    });
+  }
+
+  @override
+  void dispose() {
+    context.read<ChatWidgetProvider>().setBottomInset(0);
+    super.dispose();
   }
 
   @override

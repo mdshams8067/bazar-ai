@@ -3,7 +3,6 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/cart_provider.dart';
-import '../../providers/chat_widget_provider.dart';
 
 class AppHeader extends StatelessWidget implements PreferredSizeWidget {
   const AppHeader({super.key});
@@ -22,7 +21,7 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
         IconButton(
           tooltip: 'Ask Bazar Buddy',
           icon: const Text('💬'),
-          onPressed: () => context.read<ChatWidgetProvider>().open(),
+          onPressed: () => context.push('/chat'),
         ),
         Stack(
           alignment: Alignment.topRight,
