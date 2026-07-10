@@ -1,5 +1,5 @@
 """models/product.py — Product catalog table."""
-from sqlalchemy import Float, Integer, Numeric, String
+from sqlalchemy import Float, Integer, JSON, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -22,3 +22,10 @@ class Product(Base):
     unit_value: Mapped[float] = mapped_column(Float, nullable=False)
     stock_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Embedding vector for name_en, used only by the optional Layer 1
+    # embedding-retrieval addition in agent/embedding_match.py (see
+    # ENABLE_EMBEDDING_MATCH in core/config.py). Plain JSON list of floats,
+    # not a native pgvector `vector` column: that type is Postgres-only and
+    # would break this project's SQLite-local/Postgres-prod parity. Null
+    # until seed/embed_products.py backfills it.
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)

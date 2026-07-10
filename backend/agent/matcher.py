@@ -371,11 +371,14 @@ def _apply_specific_variant_check(ingredient: ParsedIngredient, match: Match) ->
     )
 
 
-def match_product(ingredient: ParsedIngredient, catalog: list[Product]) -> Match:
+def match_product(
+    ingredient: ParsedIngredient, catalog: list[Product], query_embedding: list[float] | None = None
+) -> Match:
     """Matches one ingredient to a real catalog product, deterministically.
 
-    Cascade: category filter -> exact term scoring -> fuzzy fallback ->
-    best top-tier candidate (sized to fit) -> three-tier substitution.
+    Cascade: category filter -> exact term scoring -> fuzzy fallback (+
+    embedding retrieval, see below) -> best top-tier candidate (sized to
+    fit) -> three-tier substitution.
 
     "Top tier" is the set of candidates tied for the highest relevance
     score (stock-blind, see score_candidates). Three outcomes:
@@ -387,14 +390,40 @@ def match_product(ingredient: ParsedIngredient, catalog: list[Product]) -> Match
       Rice out-of-stock / Chashi Chinigura Rice in stock).
     - top tier is entirely out of stock -> hand off to find_substitute()
       for the wider brand/functional/skip cascade.
-    """
+
+    query_embedding (optional, precomputed by pipeline.py's run_agent when
+    ENABLE_EMBEDDING_MATCH is on): a Layer-1 addition, purely widening the
+    candidate net alongside fuzzy_match for genuine vocabulary mismatches
+    (e.g. "chickpea flour" vs. the catalog's "BPM Gram Flour 500gm" — zero
+    shared substring, well under fuzzy_match's threshold, but obviously the
+    same thing). Every decision below this point (stock, price, size fit,
+    substitution tiers) is the same regardless of which tier a candidate
+    came from — this only ever adds candidates, never removes or
+    reprioritizes ones exact/fuzzy already found. When query_embedding is
+    None (the default — no config change needed to keep today's exact
+    behavior), this is a no-op and the cascade is byte-for-byte unchanged."""
     pool = [p for p in catalog if p.category == ingredient.category_hint]
     if not pool:
         pool = catalog
 
     scored = score_candidates(pool, ingredient.search_terms, primary_term=ingredient.name_en)
     if not scored:
-        scored = [(0, p) for p in fuzzy_match(pool, ingredient.search_terms)]
+        fuzzy_candidates = fuzzy_match(pool, ingredient.search_terms)
+        combined = fuzzy_candidates
+        if query_embedding is not None:
+            from agent.embedding_match import embedding_candidates
+
+            embed_candidates = embedding_candidates(query_embedding, pool)
+            if embed_candidates:
+                seen_ids = {p.id for p in fuzzy_candidates}
+                new_from_embedding = [p for p in embed_candidates if p.id not in seen_ids]
+                if new_from_embedding:
+                    logger.info(
+                        f"[matcher] embedding retrieval found {len(new_from_embedding)} extra "
+                        f"candidate(s) for '{ingredient.name_en}' that exact/fuzzy missed"
+                    )
+                combined = fuzzy_candidates + new_from_embedding
+        scored = [(0, p) for p in combined]
         scored.sort(key=lambda pair: (-pair[0], pair[1].id))
 
     if not scored:

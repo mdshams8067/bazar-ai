@@ -28,6 +28,7 @@ from agent.matcher import (
 from agent.prompts import SYSTEM_PROMPT
 from agent.tools import CartAction, build_cart_actions, compute_cart_totals
 from core import llm
+from core.config import ENABLE_EMBEDDING_MATCH
 from models.product import Product
 
 logger = logging.getLogger(__name__)
@@ -156,8 +157,29 @@ async def _call_llm_for_json(user_message: str) -> dict:
         return _extract_json(raw_retry)  # a second failure propagates as-is
 
 
+async def _embed_ingredients(ingredients: list[ParsedIngredient]) -> dict[int, list[float]]:
+    """One batched embedding call for every ingredient in this message (not
+    per-ingredient, not per-message-turn) — the Layer-1 retrieval addition
+    described in match_product()'s docstring. Failure here (rate limit,
+    provider outage) degrades to exact/fuzzy-only matching rather than
+    failing the whole chat turn, since this is strictly a wider net, never
+    the only way a match can succeed."""
+    from core.embeddings import aembed_texts
+
+    texts = [f"{ing.name_en} {' '.join(ing.search_terms)}".strip() for ing in ingredients]
+    try:
+        vectors = await aembed_texts(texts)
+    except Exception:
+        logger.exception("[pipeline] embedding lookup failed; continuing with exact/fuzzy matching only")
+        return {}
+    return {id(ing): vec for ing, vec in zip(ingredients, vectors)}
+
+
 def _match_ingredients(
-    ingredients: list[ParsedIngredient], catalog: list[Product], ask_pack_size: bool = False
+    ingredients: list[ParsedIngredient],
+    catalog: list[Product],
+    ask_pack_size: bool = False,
+    query_embeddings: dict[int, list[float]] | None = None,
 ) -> list[Match]:
     """Matches every ingredient; a failure on one never aborts the rest.
 
@@ -169,6 +191,12 @@ def _match_ingredients(
     customer picks one. Full recipes (cook_dish) skip this: asking a
     clarifying question per ingredient there would mean answering half a
     dozen questions to get a bowl of polao going.
+
+    query_embeddings (optional): id(ingredient) -> precomputed embedding
+    vector, computed once up front in run_agent (a single batched async
+    API call) rather than per ingredient here — this loop, and
+    match_product() itself, stay fully synchronous either way. See
+    match_product's own docstring for what this actually changes.
     """
     matches = []
     for ing in ingredients:
@@ -185,7 +213,8 @@ def _match_ingredients(
                         )
                     )
                     continue
-            matches.append(match_product(ing, catalog))
+            query_embedding = (query_embeddings or {}).get(id(ing))
+            matches.append(match_product(ing, catalog, query_embedding=query_embedding))
         except Exception:
             logger.exception(f"[pipeline] matching failed for ingredient: {ing.name_en}")
             matches.append(
@@ -406,7 +435,14 @@ async def run_agent(
         )
 
     catalog = list((await db.execute(select(Product))).scalars().all())
-    matches = _match_ingredients(parsed.ingredients, catalog, ask_pack_size=(parsed.intent == "add_items"))
+
+    query_embeddings: dict[int, list[float]] = {}
+    if ENABLE_EMBEDDING_MATCH and parsed.ingredients:
+        query_embeddings = await _embed_ingredients(parsed.ingredients)
+
+    matches = _match_ingredients(
+        parsed.ingredients, catalog, ask_pack_size=(parsed.intent == "add_items"), query_embeddings=query_embeddings
+    )
 
     if parsed.intent == "budget_dish" and parsed.budget_bdt:
         matches = _apply_budget(matches, parsed.ingredients, catalog, parsed.budget_bdt)

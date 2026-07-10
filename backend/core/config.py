@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     GEMINI_TEXT_MODEL: str = "gemini-3.1-flash-lite"
 
+    # ── Matcher: embedding-based retrieval (Layer 1) ──────────────────────
+    # When the exact/fuzzy keyword cascade in agent/matcher.py finds nothing,
+    # optionally also try embedding similarity (a wider net for genuine
+    # vocabulary mismatches, e.g. "chickpea flour" vs. a catalog product
+    # named "Besan") before giving up. Purely additive — every downstream
+    # decision (stock, price, substitution tiers) stays the same deterministic
+    # code regardless of which tier found the candidate. Off by default so
+    # this whole layer can be enabled/disabled with one env var, no revert
+    # needed, if it ever needs to be pulled out.
+    ENABLE_EMBEDDING_MATCH: bool = False
+    EMBEDDING_MODEL: str = "gemini-embedding-001"
+
     # ── Groq ──────────────────────────────────────────────────────────────
     GROQ_API_KEY: str = ""
     GROQ_TEXT_MODEL: str = "qwen/qwen3-32b"
@@ -101,6 +113,8 @@ LLM_PROVIDER = settings.LLM_PROVIDER
 LLM_FALLBACK_PROVIDER = settings.LLM_FALLBACK_PROVIDER
 GOOGLE_API_KEY = settings.GOOGLE_API_KEY
 GEMINI_TEXT_MODEL = settings.GEMINI_TEXT_MODEL
+ENABLE_EMBEDDING_MATCH = settings.ENABLE_EMBEDDING_MATCH
+EMBEDDING_MODEL = settings.EMBEDDING_MODEL
 GROQ_API_KEY = settings.GROQ_API_KEY
 GROQ_TEXT_MODEL = settings.GROQ_TEXT_MODEL
 SSLCOMMERZ_STORE_ID = settings.SSLCOMMERZ_STORE_ID
