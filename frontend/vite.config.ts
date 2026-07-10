@@ -29,7 +29,13 @@ export default defineConfig({
         // Catalog images are on an external CDN, and the API is a
         // different origin entirely — only the app shell is precached.
         globPatterns: ['**/*.{js,css,html,woff2,svg,png,ico}'],
-        navigateFallback: '/offline.html',
+        // Must be the app shell, not offline.html: this fallback fires for
+        // EVERY navigation the service worker doesn't have precached (i.e.
+        // every client-side route except the exact root), regardless of
+        // whether the network is actually up. Pointing it at offline.html
+        // broke every deep link/refresh/shared URL once the SW took
+        // control — index.html lets React Router render the real page.
+        navigateFallback: '/index.html',
       },
     }),
   ],
