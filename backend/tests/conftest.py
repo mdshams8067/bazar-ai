@@ -7,14 +7,30 @@ touched here) — the FastAPI get_db dependency is overridden per test.
 """
 from collections.abc import AsyncIterator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import models  # noqa: F401 — registers every model class with Base.metadata
+import schemas.user
 from core.database import Base, get_db
 from main import app
 from models.product import Product
+
+
+@pytest.fixture(autouse=True)
+def _skip_email_deliverability_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Signup's email deliverability check (schemas/user.py) does a live
+    DNS lookup — a real, deliberate feature, but not something the test
+    suite should depend on (network-dependent, non-hermetic, and
+    "@example.com" — IANA's reserved documentation domain, used
+    throughout these tests — deliberately declares via a null MX record
+    that it accepts no mail at all, so it would fail this check for a
+    reason that has nothing to do with what's under test). Mirrors
+    core/test_llm.py's approach of mocking the provider boundary instead
+    of hitting a real external dependency in tests."""
+    monkeypatch.setattr(schemas.user, "validate_email", lambda email, **kwargs: None)
 
 
 @pytest_asyncio.fixture
@@ -69,7 +85,7 @@ async def signup_user(client: AsyncClient, email: str = "test@example.com") -> s
     """Convenience helper: signs up a fresh user, returns their access token."""
     r = await client.post(
         "/auth/signup",
-        json={"email": email, "password": "password123", "name": "Test User"},
+        json={"email": email, "password": "Password123!", "name": "Test User"},
     )
     assert r.status_code == 200, r.text
     return r.json()["access_token"]

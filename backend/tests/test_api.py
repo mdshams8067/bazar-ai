@@ -14,14 +14,14 @@ from tests.conftest import signup_user
 async def test_signup_login_me_round_trip(client: AsyncClient) -> None:
     signup_resp = await client.post(
         "/auth/signup",
-        json={"email": "shopper@example.com", "password": "password123", "name": "Shopper"},
+        json={"email": "shopper@example.com", "password": "Password123!", "name": "Shopper"},
     )
     assert signup_resp.status_code == 200
     assert signup_resp.json()["token_type"] == "bearer"
 
     login_resp = await client.post(
         "/auth/login",
-        data={"username": "shopper@example.com", "password": "password123"},
+        data={"username": "shopper@example.com", "password": "Password123!"},
     )
     assert login_resp.status_code == 200
     token = login_resp.json()["access_token"]

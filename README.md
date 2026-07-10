@@ -23,7 +23,7 @@ The differentiator: a function-calling agent, not a Q&A chatbot. Tell it what yo
 
 FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in production / SQLite locally via one `DATABASE_URL` swap, Alembic migrations.
 
-- **Auth** — JWT bearer tokens, bcrypt password hashing (thread-pooled so it never blocks the async event loop).
+- **Auth** — JWT bearer tokens, bcrypt password hashing (thread-pooled so it never blocks the async event loop). Signup enforces password complexity (upper/lower/digit/symbol) and checks the email domain can actually receive mail (DNS/MX lookup, not just format), both mirrored live in the signup form.
 - **Products** — paginated listing, category filter, search.
 - **Cart** — add/update/remove, always re-validated against live stock.
 - **Orders** — checkout snapshots price and product name onto each order line (so order history stays readable even if a product's price or listing changes later), decrements stock, and clears the cart in one transaction.
