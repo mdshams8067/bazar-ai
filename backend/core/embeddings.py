@@ -36,7 +36,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.config import DATABASE_URL, EMBEDDING_MODEL, EMBEDDING_MODEL_FALLBACK
-from core.gemini_client import GeminiAllKeysExhausted, call_with_rotation
+from core.gemini_client import GeminiAllKeysExhausted, RotatableModelError, call_with_rotation
 from models.embedding_cache import EmbeddingCacheEntry
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,19 @@ def _gemini_embed(texts: list[str]) -> tuple[list[list[float]], str]:
     def _make_call(api_key: str, model: str) -> list[list[float]]:
         client = genai.Client(api_key=api_key)
         response = client.models.embed_content(model=model, contents=texts)
-        return [e.values for e in response.embeddings]
+        result = [e.values for e in response.embeddings]
+        if len(result) != len(texts):
+            # Doesn't raise on an oversized batch — verified live that
+            # gemini-embedding-2 silently returns exactly 1 embedding
+            # regardless of how many texts are sent (2 in -> 1 out, 50 in
+            # -> 1 out). Treated as "this model can't serve this request"
+            # rather than trusted, since zipping a short result against the
+            # full input list would otherwise silently mismap vectors to
+            # the wrong text/product instead of failing loudly.
+            raise RotatableModelError(
+                f"model={model} returned {len(result)} embeddings for {len(texts)} inputs"
+            )
+        return result
 
     try:
         vectors, model_used = call_with_rotation(

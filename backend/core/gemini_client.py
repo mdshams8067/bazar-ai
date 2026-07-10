@@ -33,6 +33,20 @@ class GeminiAllKeysExhausted(Exception):
     rotate to."""
 
 
+class RotatableModelError(Exception):
+    """Raise this from inside make_call() to signal "this (key, model)
+    combo can't actually serve this specific request — move on to the
+    next one," for a failure that isn't a genai_errors.ClientError at all.
+
+    Real, live example this exists for: gemini-embedding-2's embed_content
+    endpoint doesn't error on an oversized batch — it silently returns
+    fewer embeddings than requested (verified: a 2-item batch returns
+    exactly 1, every time, regardless of how many items were sent). A
+    caller that validates its own response shape (core/embeddings.py does,
+    for embeddings) raises this instead of letting a shape mismatch
+    silently corrupt whatever mapping it was building from the result."""
+
+
 def _error_reason(e: genai_errors.ClientError) -> str | None:
     """The specific machine-readable reason nested inside the API's error
     body (e.g. "API_KEY_INVALID", "API_KEY_SERVICE_BLOCKED") — `.status`
@@ -105,6 +119,13 @@ def call_with_rotation(make_call: Callable[[str, str], T], models: list[str]) ->
                 logger.warning(
                     f"[gemini] key#{key_index + 1}/{len(GEMINI_API_KEYS)} model={model} "
                     f"unavailable, rotating: {e}"
+                )
+                last_error = e
+                continue
+            except RotatableModelError as e:
+                logger.warning(
+                    f"[gemini] key#{key_index + 1}/{len(GEMINI_API_KEYS)} model={model} "
+                    f"can't serve this request, rotating: {e}"
                 )
                 last_error = e
                 continue
