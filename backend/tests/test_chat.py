@@ -161,6 +161,54 @@ async def test_chat_keep_only_items_with_no_match_leaves_cart_untouched(
     assert "left it as is" in body["reply"].lower()
 
 
+async def test_chat_modify_dish_swaps_cart_item(
+    client: AsyncClient, seeded_products: list[Product], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: "make it eggs instead of rice" must remove the old
+    ingredient AND add the new one in the same turn — not just pile the
+    new item on top while leaving the old one (and definitely not silently
+    forget the swap, which is the exact bug this intent was built to fix:
+    the LLM used to have nowhere to express "swap X for Y" at all, so a
+    request like "make it beef" fell back to a fresh cook_dish/add_items
+    that only ever adds, never removes)."""
+    rice, _oil, eggs = seeded_products
+    token = await signup_user(client, email="modifydish@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    await client.post("/cart/items", json={"product_id": rice.id, "quantity": 1}, headers=headers)
+
+    async def fake_run_agent(message: str, db, history=None) -> AgentResult:
+        parsed = ParsedRequest(
+            intent="modify_dish",
+            dish_name="test dish",
+            servings=4,
+            serving_unit="people",
+            budget_bdt=None,
+            ingredients=[ParsedIngredient(name_en="eggs")],
+            remove_ingredients=[ParsedIngredient(name_en="rice")],
+            reply_context="Swapping rice for eggs.",
+        )
+        match = Match(product=eggs, status="ok", quantity=2, line_total=300.0, note=None)
+        return AgentResult(
+            reply="Swapping rice for eggs.",
+            intent="modify_dish",
+            matches=[match],
+            cart_actions=[],
+            totals={"subtotal_bdt": 300.0, "item_count": 1},
+            unmatched=[],
+            parsed=parsed,
+        )
+
+    monkeypatch.setattr(chat_module, "run_agent", fake_run_agent)
+
+    resp = await client.post("/chat", json={"message": "make it eggs instead of rice"}, headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cart"]["item_count"] == 1
+    assert body["cart"]["items"][0]["product"]["name_en"] == eggs.name_en
+    assert "removed" in body["reply"].lower()
+    assert rice.name_en in body["reply"]
+
+
 async def test_chat_cart_conflict_does_not_crash_whole_response(
     client: AsyncClient, seeded_products: list[Product], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,6 +87,12 @@ class ParsedRequest:
     # question up front, answered by unrelated facts afterward, reads as
     # incoherent (this was a real UX complaint, not a style nitpick).
     followup_question: str | None = None
+    # modify_dish only: the OLD ingredient(s) being swapped OUT of the
+    # cart (matched against the current cart, like remove_items). Empty
+    # for every other intent — `ingredients` above carries the NEW
+    # ingredient(s) being swapped in, matched against the catalog like a
+    # normal add.
+    remove_ingredients: list[ParsedIngredient] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, raw: dict) -> ParsedRequest:
@@ -99,6 +105,7 @@ class ParsedRequest:
             ingredients=[ParsedIngredient.from_dict(i) for i in (raw.get("ingredients") or [])],
             reply_context=str(raw.get("reply_context") or ""),
             followup_question=raw.get("followup_question") or None,
+            remove_ingredients=[ParsedIngredient.from_dict(i) for i in (raw.get("remove_ingredients") or [])],
         )
 
 
@@ -267,7 +274,7 @@ def _assemble_reply(parsed: ParsedRequest, matches: list[Match], totals: dict) -
     parts = [_ensure_sentence(parsed.reply_context)] if parsed.reply_context else []
 
     added = [m for m in matches if m.product is not None]
-    if parsed.intent == "add_items" and added:
+    if parsed.intent in ("add_items", "modify_dish") and added:
         # Named-product requests deserve an explicit confirmation of the
         # exact real product + pack size matched — e.g. ketchup comes in
         # several genuinely different sizes, and the customer shouldn't
@@ -316,7 +323,11 @@ async def run_agent(
     # CART, not the catalog — there's nothing here for match_product() to
     # do. The router (routers/chat.py) handles the actual cart mutation
     # using parsed.ingredients (still available via AgentResult.parsed
-    # below).
+    # below). modify_dish is deliberately NOT in this list — its
+    # "ingredients" (the NEW item being swapped in) DO need catalog
+    # matching, same as add_items; only its "remove_ingredients" (the OLD
+    # item being swapped out) are cart-only, and the router handles that
+    # side separately.
     if parsed.intent in ("other", "remove_items", "clear_cart", "keep_only_items") or not parsed.ingredients:
         return AgentResult(
             reply=parsed.reply_context or "How can I help you shop today?",

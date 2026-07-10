@@ -14,7 +14,7 @@ Respond ONLY with valid JSON, no preamble, no markdown fences.
 
 OUTPUT SCHEMA:
 {
-  "intent": "cook_dish" | "add_items" | "product_question" | "budget_dish" | "remove_items" | "clear_cart" | "keep_only_items" | "other",
+  "intent": "cook_dish" | "add_items" | "product_question" | "budget_dish" | "remove_items" | "clear_cart" | "keep_only_items" | "modify_dish" | "other",
   "dish_name": <string or null: canonical dish name if intent is cook_dish/budget_dish>,
   "servings": <integer or null: stated or implied servings, or the equivalent
               quantity if the request isn't people-based (see serving_unit);
@@ -56,6 +56,12 @@ OUTPUT SCHEMA:
                           reasonable substitute exists>
     }
   ],
+  "remove_ingredients": [
+    <same shape as one entry in "ingredients" above, but only name_en and
+    search_terms actually matter — used ONLY for "modify_dish": the OLD
+    ingredient(s) being swapped OUT of the customer's cart. Empty list for
+    every other intent.>
+  ],
   "reply_context": <string: one short sentence describing what you
                     understood, for the UI to show — e.g. "Ingredients
                     for morog polao, 6 servings." Just the understanding
@@ -69,7 +75,7 @@ OUTPUT SCHEMA:
                         when servings are unstated, "How many people are
                         you cooking for?" null if there's nothing to ask
                         (e.g. remove_items, clear_cart, keep_only_items,
-                        product_question, other).>
+                        modify_dish, product_question, other).>
 }
 
 RULES:
@@ -108,6 +114,31 @@ RULES:
   happens.
 - "clear_cart": the customer asks to empty, clear, or remove everything
   from their cart. No ingredients needed — leave that list empty.
+- "modify_dish": the customer wants to SWAP one or more ingredients
+  already in their cart for a different one — e.g. "make it beef" (after
+  ordering chicken biryani), "use butter instead of oil", "actually make
+  it mutton, not beef". This is different from both "remove_items"
+  (nothing is being added back) and "add_items"/"cook_dish" (nothing is
+  being taken out) — it's both at once, in one message. Use the
+  conversation history to figure out which already-added ingredient is
+  being replaced — e.g. if the customer previously asked for chicken
+  biryani, "make it beef" means beef REPLACES chicken, it is not an
+  addition alongside it.
+  - "ingredients": the NEW ingredient(s) being swapped IN — same shape
+    and rules as add_items/cook_dish (name_en, search_terms,
+    category_hint, quantity, quantity_unit, essential, substitute_hint).
+    Infer the quantity from what it's replacing (e.g. if the earlier turn
+    established 1kg chicken for this dish, use ~1kg beef) — do not fall
+    back to a bare default of 1 when history gives you a real number to
+    scale from.
+  - "remove_ingredients": the OLD ingredient(s) being swapped OUT — same
+    shape as an "ingredients" entry, but only name_en/search_terms
+    matter; a separate system matches these against the customer's
+    current cart (not the catalog) and removes them.
+  - If you can't tell from the conversation history what's actually being
+    replaced (no prior dish/ingredient context at all — e.g. this is the
+    very first message), do not guess at what to remove. Use intent
+    "other" instead and honestly ask what they'd like to change.
 - "keep_only_items": the customer asks to keep ONLY certain item(s) in
   their cart and remove everything else (e.g., "only keep the lacchi
   items", "just keep the rice, remove the rest", "get rid of everything

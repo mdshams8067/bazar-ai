@@ -243,6 +243,29 @@ async def chat(
             followup_question=result.parsed.followup_question,
         )
 
+    # modify_dish swaps an ingredient already in the cart for a different
+    # one, in one message ("make it beef"). The OLD side (remove_ingredients)
+    # is cart-only, same matching as remove_items — handled here, before the
+    # NEW side merges in below through the normal add path. Marking these
+    # for delete now (not committing yet) is safe: upsert_cart_item's own
+    # SELECT below autoflushes pending deletes first, so it never sees a
+    # stale row.
+    removed_names: list[str] = []
+    not_found_remove_names: list[str] = []
+    if result.intent == "modify_dish" and result.parsed.remove_ingredients:
+        cart_items = await load_cart(db, current_user.id)
+        for ingredient in result.parsed.remove_ingredients:
+            found = _find_cart_item_matches(ingredient, cart_items)
+            if not found:
+                not_found_remove_names.append(ingredient.name_en)
+                continue
+            for item in found:
+                removed_names.append(item.product.name_en)
+                await db.delete(item)
+                cart_items.remove(item)
+        if removed_names:
+            logger.info(f"[chat] modify_dish: removed {removed_names} for user {current_user.id}")
+
     # Merge matched products into the user's real cart. Each upsert is
     # defensive on its own — one conflict (e.g. two ingredients resolving
     # to the same product and together exceeding stock) shouldn't drop the
@@ -265,6 +288,10 @@ async def chat(
     await db.commit()
 
     reply = result.reply
+    if removed_names:
+        reply = f"{reply} Removed {', '.join(removed_names)} from your cart."
+    if not_found_remove_names:
+        reply = f"{reply} Couldn't find {', '.join(not_found_remove_names)} in your cart to remove."
     if conflict_notes:
         reply = f"{reply} {' '.join(conflict_notes)}"
 

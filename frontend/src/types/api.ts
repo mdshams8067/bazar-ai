@@ -114,6 +114,7 @@ export type ChatIntent =
   | 'remove_items'
   | 'clear_cart'
   | 'keep_only_items'
+  | 'modify_dish'
   | 'other'
 
 export type MatchStatus =
