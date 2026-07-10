@@ -2,6 +2,8 @@
 
 An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products. Inspired by Shwapno, built independently as a take-home project.
 
+**Live demo:** [bazar-ai.vercel.app](https://bazar-ai.vercel.app) — note: the backend runs on Render's free tier, so the first request after a period of inactivity can take up to ~50s to wake up (the app shows a banner while this happens).
+
 ## Data pipeline
 
 1. **Scrape** — a polite, `robots.txt`-compliant scrape of Shwapno.com, a real Bangladeshi grocery retailer (`scrapper/scraper.py`). Product listings are client-side rendered, so this uses Playwright (headless Chromium) rather than a plain HTTP fetch, scraping category pages via infinite scroll in batches instead of one request per product. Honest `User-Agent`, 2-second minimum delay between page loads, no `/api*` paths or query strings touched.
@@ -21,7 +23,7 @@ The differentiator: a function-calling agent, not a Q&A chatbot. Tell it what yo
 
 FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in production / SQLite locally via one `DATABASE_URL` swap, Alembic migrations.
 
-- **Auth** — Supabase Auth, not a hand-rolled system. The frontend signs up/logs in directly against Supabase's own API (`@supabase/supabase-js`); this backend never sees a password and issues no tokens of its own — it only verifies the token Supabase already issued, against their public JWKS (ES256, asymmetric — no shared secret to protect). A `profiles` table holds the one thing Supabase's own schema has no place for (name/phone), keyed to the same id Supabase assigns, and is created lazily on a user's first authenticated request.
+- **Auth** — Supabase Auth, not a hand-rolled system. An earlier version of this project did roll its own (email format/deliverability checks, password complexity rules, bcrypt hashing, JWT issuance) — it worked, but auth is a commodity, security-critical surface (rate-limiting, lockout, token edge cases) that's easy to get subtly wrong on a short deadline, and a mature managed provider already solves it. The frontend now signs up/logs in directly against Supabase's own API (`@supabase/supabase-js`); this backend never sees a password and issues no tokens of its own — it only verifies the token Supabase already issued, against their public JWKS (ES256, asymmetric — no shared secret to protect). A `profiles` table holds the one thing Supabase's own schema has no place for (name/phone), keyed to the same id Supabase assigns, and is created lazily on a user's first authenticated request.
 - **Products** — paginated listing, category filter, search.
 - **Cart** — add/update/remove, always re-validated against live stock.
 - **Orders** — checkout snapshots price and product name onto each order line (so order history stays readable even if a product's price or listing changes later), decrements stock, and clears the cart in one transaction.
@@ -30,6 +32,12 @@ FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in pro
 ## Frontend
 
 React + Vite + Tailwind, installable as a PWA. Product browsing, cart, checkout, order history, and a Bazar Buddy chat widget available from anywhere in the app.
+
+## Deployment
+
+Frontend on Vercel, backend on Render, database + auth on Supabase — each is running that stack's free tier. This isn't production yet, just a take-home submission, so free tier is the right call for now; an actual production launch would need to upgrade off it (Render's free tier in particular — see the cold-start limitation below).
+
+The split itself isn't arbitrary — it matches what each piece is actually for: Vercel builds and serves the static Vite/React bundle off a CDN with zero server to manage; Render runs the FastAPI app as a real long-lived process (needed for it at all — Vercel's model is serverless functions, not a persistent async app); Supabase was already the choice for the database, so it covering auth too meant no third provider to wire in.
 
 ## Getting started
 
@@ -63,3 +71,4 @@ npm run dev
 ## Known limitations
 
 - **Signup email confirmation runs on Supabase's default shared email sender, not a custom SMTP provider.** That sender is capped at just 2 emails/hour by default — fine for this project's expected signup volume, but a real production launch should configure a custom SMTP provider (Resend, Postmark, etc.) in Supabase's Auth settings instead, both to lift that limit and to get proper bounce/complaint tracking under your own sending reputation rather than Supabase's shared one.
+- **Backend cold starts on Render's free tier** after ~15 minutes of inactivity — the first request afterward can take up to ~50 seconds. The frontend polls `/health` and shows a "waking up" banner rather than hiding the delay.
