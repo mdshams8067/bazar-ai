@@ -16,18 +16,19 @@ take-home.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.matcher import Match
+from agent.matcher import Match, ParsedIngredient
 from agent.pipeline import run_agent
 from core.database import get_db
 from core.llm import LLMUnavailableError
 from core.security import get_current_user
-from models.cart_item import AddedVia
+from models.cart_item import AddedVia, CartItem
 from models.user import User
 from routers.cart import load_cart, to_cart_read, upsert_cart_item
 from schemas.cart import CartRead
@@ -97,6 +98,24 @@ def _match_to_read(m: Match) -> MatchRead:
     )
 
 
+def _find_cart_item_matches(ingredient: ParsedIngredient, cart_items: list[CartItem]) -> list[CartItem]:
+    """Matches a removal-target ingredient against the user's CURRENT cart
+    (not the catalog — there's nothing to match against there for a
+    "remove this" request). Whole-word, case-insensitive match of the
+    ingredient's name/search_terms against each cart item's product name —
+    word-boundary, not a plain substring check, since a short term like
+    "RD" (from "RD Banana Milk Drinks") is also a raw substring of
+    unrelated words like "Cardamom". The cart is small enough that this
+    doesn't need matcher.py's full scoring cascade, just this one guard."""
+    terms = [t.lower() for t in ([ingredient.name_en, *ingredient.search_terms]) if t]
+    patterns = [re.compile(rf"\b{re.escape(term)}\b") for term in terms]
+    return [
+        item
+        for item in cart_items
+        if any(pattern.search(item.product.name_en.lower()) for pattern in patterns)
+    ]
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(
     payload: ChatRequest,
@@ -114,6 +133,55 @@ async def chat(
             intent="other",
             matches=[],
             cart=to_cart_read(await load_cart(db, current_user.id)),
+        )
+
+    if result.intent == "clear_cart":
+        cart_items = await load_cart(db, current_user.id)
+        for item in cart_items:
+            await db.delete(item)
+        await db.commit()
+        reply_parts = [result.parsed.reply_context] if result.parsed.reply_context else []
+        reply_parts.append(
+            f"Removed all {len(cart_items)} item(s)." if cart_items else "Your cart was already empty."
+        )
+        logger.info(f"[chat] clear_cart: removed {len(cart_items)} item(s) for user {current_user.id}")
+        return ChatResponse(
+            reply=" ".join(reply_parts),
+            intent=result.intent,
+            matches=[],
+            cart=to_cart_read([]),
+            followup_question=result.parsed.followup_question,
+        )
+
+    if result.intent == "remove_items":
+        cart_items = await load_cart(db, current_user.id)
+        removed_names: list[str] = []
+        not_found_names: list[str] = []
+        for ingredient in result.parsed.ingredients:
+            found = _find_cart_item_matches(ingredient, cart_items)
+            if not found:
+                not_found_names.append(ingredient.name_en)
+                continue
+            for item in found:
+                removed_names.append(item.product.name_en)
+                await db.delete(item)
+                cart_items.remove(item)  # don't let a later ingredient re-match an already-removed row
+        await db.commit()
+        logger.info(f"[chat] remove_items: removed {removed_names}, not found {not_found_names}")
+
+        reply_parts = [result.parsed.reply_context] if result.parsed.reply_context else []
+        if removed_names:
+            reply_parts.append(f"Removed {', '.join(removed_names)} from your cart.")
+        if not_found_names:
+            reply_parts.append(f"Couldn't find {', '.join(not_found_names)} in your cart.")
+        if not removed_names and not not_found_names:
+            reply_parts.append("Nothing to remove.")
+        return ChatResponse(
+            reply=" ".join(reply_parts),
+            intent=result.intent,
+            matches=[],
+            cart=to_cart_read(await load_cart(db, current_user.id)),
+            followup_question=result.parsed.followup_question,
         )
 
     # Merge matched products into the user's real cart. Each upsert is
