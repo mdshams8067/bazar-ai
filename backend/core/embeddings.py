@@ -1,11 +1,22 @@
 """
 core/embeddings.py — Gemini embedding-vector wrapper.
 
-Same shape as core/llm.py: a thin, provider-specific wrapper plus a local
-SQLite cache, so callers never touch the SDK directly and never pay twice
-for an identical text. Used only by the Layer 1 retrieval addition in
+Same shape as core/llm.py: a thin, provider-specific wrapper plus a cache,
+so callers never touch the SDK directly and never pay twice for an
+identical text. Used only by the Layer 1 retrieval addition in
 agent/embedding_match.py — nothing else in this codebase calls it, and it's
 inert unless ENABLE_EMBEDDING_MATCH=true (see core/config.py).
+
+The cache lives in the same database as everything else (models/
+embedding_cache.py, Postgres in prod / SQLite locally via the usual
+DATABASE_URL swap) rather than a local SQLite file — a local file doesn't
+survive Render's free-tier redeploys (no persistent disk configured), so
+every restart was silently re-paying for embeddings it already had. Uses
+its own plain sync engine, same deliberate exception as seed/seed_db.py:
+embed_texts() is itself a sync function run inside asyncio.to_thread (see
+aembed_texts below), so a sync DB call here never blocks the event loop —
+there's no benefit to async ceremony in a function that's already off the
+main thread.
 
 Every embedding is returned/stored alongside the model that produced it
 (core/gemini_client.py may rotate from EMBEDDING_MODEL to
@@ -18,35 +29,20 @@ with that same model.
 """
 import asyncio
 import hashlib
-import json
 import logging
-import sqlite3
 import time
-from pathlib import Path
 
-from core.config import EMBEDDING_MODEL, EMBEDDING_MODEL_FALLBACK
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from core.config import DATABASE_URL, EMBEDDING_MODEL, EMBEDDING_MODEL_FALLBACK
 from core.gemini_client import GeminiAllKeysExhausted, call_with_rotation
+from models.embedding_cache import EmbeddingCacheEntry
 
 logger = logging.getLogger(__name__)
 
-_CACHE_DB_PATH = Path(__file__).resolve().parent.parent / "embedding_cache.db"
-
-
-def _cache_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(_CACHE_DB_PATH)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS embedding_cache "
-        "(key TEXT PRIMARY KEY, vector TEXT, model TEXT, created_at TEXT)"
-    )
-    # Self-heal a cache file created before the `model` column existed
-    # (CREATE TABLE IF NOT EXISTS doesn't alter an already-existing table) —
-    # this cache is local, disposable, and rebuilds itself from scratch
-    # either way, but crashing every embed call on a stale schema instead
-    # of just adding the column is a needless failure mode.
-    existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(embedding_cache)")}
-    if "model" not in existing_columns:
-        conn.execute("ALTER TABLE embedding_cache ADD COLUMN model TEXT")
-    return conn
+_sync_engine = create_engine(DATABASE_URL)
+_SyncSession = sessionmaker(bind=_sync_engine)
 
 
 def _cache_key(text: str) -> str:
@@ -58,35 +54,23 @@ def _cache_key(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _cache_get_many(keys: list[str]) -> dict[str, tuple[list[float], str]]:
+def _cache_get_many(db: Session, keys: list[str]) -> dict[str, tuple[list[float], str]]:
     if not keys:
         return {}
-    conn = _cache_conn()
-    try:
-        placeholders = ",".join("?" for _ in keys)
-        rows = conn.execute(
-            f"SELECT key, vector, model FROM embedding_cache WHERE key IN ({placeholders})", keys
-        ).fetchall()
-        return {key: (json.loads(vector), model) for key, vector, model in rows}
-    finally:
-        conn.close()
+    rows = db.execute(select(EmbeddingCacheEntry).where(EmbeddingCacheEntry.key.in_(keys))).scalars().all()
+    return {row.key: (row.vector, row.model) for row in rows}
 
 
-def _cache_set_many(items: dict[str, tuple[list[float], str]]) -> None:
+def _cache_set_many(db: Session, items: dict[str, tuple[list[float], str]]) -> None:
     if not items:
         return
-    conn = _cache_conn()
-    try:
-        conn.executemany(
-            "INSERT OR REPLACE INTO embedding_cache (key, vector, model, created_at) VALUES (?, ?, ?, ?)",
-            [
-                (key, json.dumps(vec), model, time.strftime("%Y-%m-%d %H:%M:%S"))
-                for key, (vec, model) in items.items()
-            ],
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    # merge(), not add(): a rare race between two concurrent requests
+    # embedding the same never-before-seen text would otherwise hit a
+    # primary-key collision on insert — merge() upserts instead, portable
+    # across SQLite and Postgres without dialect-specific ON CONFLICT SQL.
+    for key, (vector, model) in items.items():
+        db.merge(EmbeddingCacheEntry(key=key, vector=vector, model=model))
+    db.commit()
 
 
 def embed_texts(texts: list[str], use_cache: bool = True) -> list[tuple[list[float], str]]:
@@ -105,22 +89,27 @@ def embed_texts(texts: list[str], use_cache: bool = True) -> list[tuple[list[flo
         return []
 
     keys = [_cache_key(t) for t in texts]
-    cached = _cache_get_many(keys) if use_cache else {}
+    db = _SyncSession()
+    try:
+        cached = _cache_get_many(db, keys) if use_cache else {}
 
-    missing_idx = [i for i, k in enumerate(keys) if k not in cached]
-    if missing_idx:
-        fresh_vectors, model_used = _gemini_embed([texts[i] for i in missing_idx])
-        new_entries = {keys[i]: (vec, model_used) for i, vec in zip(missing_idx, fresh_vectors)}
-        cached.update(new_entries)
-        if use_cache:
-            _cache_set_many(new_entries)
+        missing_idx = [i for i, k in enumerate(keys) if k not in cached]
+        if missing_idx:
+            fresh_vectors, model_used = _gemini_embed([texts[i] for i in missing_idx])
+            new_entries = {keys[i]: (vec, model_used) for i, vec in zip(missing_idx, fresh_vectors)}
+            cached.update(new_entries)
+            if use_cache:
+                _cache_set_many(db, new_entries)
 
-    return [cached[k] for k in keys]
+        return [cached[k] for k in keys]
+    finally:
+        db.close()
 
 
 async def aembed_texts(texts: list[str], use_cache: bool = True) -> list[tuple[list[float], str]]:
-    """Async wrapper — offloads the blocking API call so the FastAPI event
-    loop is never blocked by embedding latency (same pattern as llm.achat)."""
+    """Async wrapper — offloads the blocking API call (and the sync DB
+    cache lookup alongside it) so the FastAPI event loop is never blocked
+    (same pattern as llm.achat)."""
     return await asyncio.to_thread(embed_texts, texts, use_cache)
 
 
