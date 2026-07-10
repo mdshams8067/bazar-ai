@@ -75,6 +75,20 @@ class ParsedIngredient:
     # and only ever used by the deterministic code as a last resort, after
     # brand and functional substitution both fail. See agent/stock.py.
     diy_substitute: list[SubstituteComponent] | None = None
+    # True when the customer named a specific premium/rare variant of a
+    # more generic ingredient (wagyu beef, saffron rice, black winter
+    # truffle) rather than the everyday version. The matcher is keyword-
+    # based — it has no idea "wagyu beef" and "beef" aren't the same
+    # thing, so without this flag a catalog that (realistically) has no
+    # wagyu at all silently matches ordinary beef and reports a clean
+    # "ok", never telling the customer they didn't get what they asked
+    # for. See _apply_specific_variant_check() in this module.
+    is_specific_variant: bool = False
+    # Only meaningful when is_specific_variant=True — the generic category
+    # name a normal grocery catalog would actually carry (e.g. "beef" for
+    # wagyu beef), used to phrase the substitution note if only a generic
+    # product gets matched.
+    generic_fallback_name: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict) -> ParsedIngredient:
@@ -92,6 +106,8 @@ class ParsedIngredient:
             essential=bool(raw.get("essential", True)),
             substitute_hint=raw.get("substitute_hint") or None,
             diy_substitute=[SubstituteComponent.from_dict(c) for c in diy_raw] if diy_raw else None,
+            is_specific_variant=bool(raw.get("is_specific_variant", False)),
+            generic_fallback_name=raw.get("generic_fallback_name") or None,
         )
 
 
@@ -312,6 +328,35 @@ def find_pack_size_options(ingredient: ParsedIngredient, catalog: list[Product])
     return sorted(distinct_sizes.values(), key=lambda p: to_base(p.unit, p.unit_value)[1])
 
 
+def _apply_specific_variant_check(ingredient: ParsedIngredient, match: Match) -> Match:
+    """A clean "ok" match can still be dishonest: the scoring cascade only
+    checks term overlap, so "wagyu beef" and "beef" score identically
+    against an ordinary beef product — nothing in that path knows wagyu
+    is a specific, almost certainly-uncarried premium variant, not just
+    another word for beef. When the LLM has flagged the ingredient as
+    exactly that kind of specific/premium variant, checks whether the
+    matched product's name actually contains that specific descriptor;
+    if not, this was really a silent downgrade to the generic version,
+    so it's rewritten to look like any other functional substitution
+    (same status/tone as ghee -> soybean oil) instead of quietly
+    reporting success for something the customer didn't actually get.
+    Only acts on a plain "ok" match — anything already flagged as a
+    substitution (brand/functional/DIY) already tells the customer it
+    isn't the exact original, so there's nothing dishonest to correct."""
+    if match.status != "ok" or match.product is None or not ingredient.is_specific_variant:
+        return match
+    if ingredient.name_en.lower() in match.product.name_en.lower():
+        return match  # genuinely matched the specific variant itself
+    generic = ingredient.generic_fallback_name or "a regular version"
+    return Match(
+        product=match.product,
+        status="substituted_functional",
+        quantity=match.quantity,
+        line_total=match.line_total,
+        note=f"Couldn't find {ingredient.name_en} specifically — added {match.product.name_en} ({generic}) instead (quality and flavor will differ)",
+    )
+
+
 def match_product(ingredient: ParsedIngredient, catalog: list[Product]) -> Match:
     """Matches one ingredient to a real catalog product, deterministically.
 
@@ -375,11 +420,9 @@ def match_product(ingredient: ParsedIngredient, catalog: list[Product]) -> Match
 
     if in_stock_top and not oos_top:
         product, qty = best_size_fit(in_stock_top, ingredient)
-        return Match(
-            product=product,
-            status="ok",
-            quantity=qty,
-            line_total=round(product.price_bdt * qty, 2),
+        return _apply_specific_variant_check(
+            ingredient,
+            Match(product=product, status="ok", quantity=qty, line_total=round(product.price_bdt * qty, 2)),
         )
 
     if in_stock_top and oos_top:

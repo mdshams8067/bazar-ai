@@ -84,7 +84,31 @@ OUTPUT SCHEMA:
                          essential ingredient that qualifies, whether or
                          not it turns out to be unavailable — a separate
                          system only uses it as a last resort, after
-                         checking the real catalog and stock first.>
+                         checking the real catalog and stock first.>,
+      "is_specific_variant": <boolean: true ONLY when the customer named a
+                             specific premium, rare, or branded-tier
+                             variant of a more generic ingredient — e.g.
+                             "wagyu beef", "Kobe beef", "saffron rice",
+                             "black winter truffle", "aged 24-month
+                             parmesan" — where getting the everyday
+                             generic version instead (regular beef, plain
+                             rice, regular parmesan) would NOT be what
+                             the customer actually asked for. false for a
+                             completely ordinary ingredient (plain
+                             "beef", "rice", "parmesan") even if a
+                             specific brand happens to get matched to it
+                             — that's an ordinary brand choice, not a
+                             tier/quality difference, and doesn't need
+                             this flag. Default false; only set true when
+                             it's genuinely a distinct premium tier a
+                             normal grocery catalog is unlikely to carry
+                             at all.>,
+      "generic_fallback_name": <string or null: ONLY when
+                                is_specific_variant is true — the plain
+                                generic category name a normal catalog
+                                would carry instead (e.g. "beef" for
+                                wagyu beef, "rice" for a specific rare
+                                rice varietal). null otherwise.>
     }
   ],
   "remove_ingredients": [
@@ -112,6 +136,12 @@ OUTPUT SCHEMA:
 }
 
 RULES:
+- is_specific_variant is for a genuine tier/quality distinction the
+  catalog realistically won't carry (wagyu vs. regular beef), not for
+  ordinary descriptiveness — "boneless chicken breast," "fresh ginger,"
+  "organic tomato" are all still the everyday version of that ingredient
+  and should be false. Set it true sparingly and honestly; false is the
+  safe default whenever it's a close call.
 - diy_substitute components must be plain, common grocery staples likely
   to exist in a Bangladeshi grocery catalog under a generic name (butter,
   milk, yogurt, lemon, vinegar, flour, sugar, baking powder, etc.) — the

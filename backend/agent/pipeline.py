@@ -291,13 +291,20 @@ def _assemble_reply(parsed: ParsedRequest, matches: list[Match], totals: dict) -
                 f"{match.product.name_en} is ৳{match.product.price_bdt:.2f} "
                 f"and {stock_note} ({match.product.stock_qty} available)."
             )
-        # No real product to report a fact about — this also catches a
-        # genuinely conversational question the LLM misclassified as
-        # product_question instead of ingredient_question (the two can be
-        # a fine line, e.g. "is paneer available?" vs "do I need paneer
-        # for this?"). reply_context is a real, useful answer in that
-        # case rather than a dead end — never a fabricated price/stock
-        # claim, per the system prompt's own rule for this intent.
+        # No real product to report a fact about. Prefer the match's own
+        # note first — it's the deterministic, code-verified answer to
+        # the actual question asked ("we don't carry tuna and couldn't
+        # find a substitute"), not the generic "checking for you"
+        # placeholder the LLM writes into reply_context before the real
+        # lookup even runs (see the prompt rule for this intent) — that
+        # placeholder is fine as a fallback, but stating the real finding
+        # directly is a genuinely better answer whenever it's available.
+        # reply_context is still the fallback for a genuinely
+        # conversational question the LLM misclassified as
+        # product_question instead of ingredient_question (a fine line,
+        # e.g. "is paneer available?" vs "do I need paneer for this?").
+        if match and match.note:
+            return match.note
         return parsed.reply_context or "Sorry, I couldn't find that product in our catalog."
 
     parts = [_ensure_sentence(parsed.reply_context)] if parsed.reply_context else []
@@ -323,6 +330,32 @@ def _assemble_reply(parsed: ParsedRequest, matches: list[Match], totals: dict) -
             parts.append(
                 f"I couldn't fit everything under ৳{parsed.budget_bdt:.0f} — "
                 f"the closest I could get is ৳{totals['subtotal_bdt']:.2f} for these items."
+            )
+
+    # unavailable_essential is qualitatively different from a routine
+    # substitution or optional skip — it means the dish genuinely can't
+    # be completed as asked, not just completed with a stand-in. Leaving
+    # that to the match card alone (like every other note) let a reply
+    # like "Added 2 item(s) to your cart" stand as the whole story when
+    # the one ingredient that made the dish what it was — e.g. foie gras
+    # for a foie gras terrine — never made it in at all. Calling this out
+    # by name here doesn't reintroduce the "wall of text" problem that
+    # motivated not repeating notes generally: it's specifically the one
+    # failure severe enough to change whether "Added N items" reads as
+    # good news or not.
+    essential_failures = [
+        ing.name_en for ing, m in zip(parsed.ingredients, matches) if m.status == "unavailable_essential"
+    ]
+    if essential_failures:
+        if len(essential_failures) == 1:
+            parts.append(
+                f"Sorry, I couldn't get {essential_failures[0]} — no substitute worked either, "
+                f"so you may want to source it elsewhere for this dish."
+            )
+        else:
+            parts.append(
+                f"Sorry, I couldn't get {', '.join(essential_failures)} — no substitute worked for "
+                f"them either, so you may want to source them elsewhere for this dish."
             )
 
     return " ".join(parts)
