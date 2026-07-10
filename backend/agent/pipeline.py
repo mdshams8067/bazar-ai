@@ -291,7 +291,14 @@ def _assemble_reply(parsed: ParsedRequest, matches: list[Match], totals: dict) -
                 f"{match.product.name_en} is ৳{match.product.price_bdt:.2f} "
                 f"and {stock_note} ({match.product.stock_qty} available)."
             )
-        return "Sorry, I couldn't find that product in our catalog."
+        # No real product to report a fact about — this also catches a
+        # genuinely conversational question the LLM misclassified as
+        # product_question instead of ingredient_question (the two can be
+        # a fine line, e.g. "is paneer available?" vs "do I need paneer
+        # for this?"). reply_context is a real, useful answer in that
+        # case rather than a dead end — never a fabricated price/stock
+        # claim, per the system prompt's own rule for this intent.
+        return parsed.reply_context or "Sorry, I couldn't find that product in our catalog."
 
     parts = [_ensure_sentence(parsed.reply_context)] if parsed.reply_context else []
 
@@ -348,8 +355,13 @@ async def run_agent(
     # "ingredients" (the NEW item being swapped in) DO need catalog
     # matching, same as add_items; only its "remove_ingredients" (the OLD
     # item being swapped out) are cart-only, and the router handles that
-    # side separately.
-    if parsed.intent in ("other", "remove_items", "clear_cart", "keep_only_items") or not parsed.ingredients:
+    # side separately. ingredient_question never has ingredients to match
+    # at all (see prompts.py) — it's a conversational answer, not a cart
+    # action — but it's listed here explicitly too, not just relying on
+    # `not parsed.ingredients`, so a stray populated list from the LLM
+    # can never accidentally trigger a real catalog/cart side effect for
+    # what's supposed to be a pure question.
+    if parsed.intent in ("other", "remove_items", "clear_cart", "keep_only_items", "ingredient_question") or not parsed.ingredients:
         return AgentResult(
             reply=parsed.reply_context or "How can I help you shop today?",
             intent=parsed.intent,

@@ -104,6 +104,7 @@ export type ChatIntent =
   | 'cook_dish'
   | 'add_items'
   | 'product_question'
+  | 'ingredient_question'
   | 'budget_dish'
   | 'remove_items'
   | 'clear_cart'

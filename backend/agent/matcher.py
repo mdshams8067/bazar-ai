@@ -355,10 +355,16 @@ def match_product(ingredient: ParsedIngredient, catalog: list[Product]) -> Match
         diy_match = match_diy_substitute(ingredient, catalog)
         if diy_match:
             return diy_match
+        # Same real-world situation as find_substitute()'s final fallback
+        # below (essential, nothing worked) — use the same status so it
+        # gets the same clear "couldn't fulfil" treatment in the UI,
+        # rather than the weaker, more ambiguous-sounding "not found" a
+        # customer could easily misread as a search/typo problem instead
+        # of "we genuinely don't carry this and have no substitute."
         return Match(
             product=None,
-            status="unmatched",
-            note=f"Couldn't find \"{ingredient.name_en}\" in the catalog.",
+            status="unavailable_essential",
+            note=f"Sorry, we don't carry {ingredient.name_en} and couldn't find a substitute — you may need to source it elsewhere for this dish.",
         )
 
     top_score = scored[0][0]

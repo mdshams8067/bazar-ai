@@ -70,7 +70,7 @@ def match_diy_substitute(ingredient: ParsedIngredient, catalog: list[Product]) -
         status="substituted_diy",
         quantity=0.0,
         line_total=total,
-        note=f"{ingredient.name_en} is unavailable — added {', '.join(descriptions)} so you can make a substitute at home",
+        note=f"{ingredient.name_en} is unavailable — added {', '.join(descriptions)} so you can make a substitute at home (results will differ from the real thing)",
         components=components,
     )
 
@@ -159,5 +159,5 @@ def find_substitute(
     return Match(
         product=None,
         status="unavailable_essential",
-        note=f"{ingredient.name_en} is essential but unavailable — you may want to check back later",
+        note=f"Sorry, {ingredient.name_en} is out of stock right now and no substitute worked — you may want to check back later or source it elsewhere.",
     )
