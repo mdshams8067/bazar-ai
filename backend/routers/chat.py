@@ -184,6 +184,65 @@ async def chat(
             followup_question=result.parsed.followup_question,
         )
 
+    if result.intent == "keep_only_items":
+        cart_items = await load_cart(db, current_user.id)
+        keep_items: list[CartItem] = []
+        not_found_names: list[str] = []
+        for ingredient in result.parsed.ingredients:
+            found = _find_cart_item_matches(ingredient, cart_items)
+            if not found:
+                not_found_names.append(ingredient.name_en)
+                continue
+            for item in found:
+                if item not in keep_items:
+                    keep_items.append(item)
+
+        reply_parts = [result.parsed.reply_context] if result.parsed.reply_context else []
+
+        if not keep_items:
+            # Nothing named actually matched anything in the cart — refuse
+            # to blindly empty it on what might be a hallucinated/misspelled
+            # item name. No-op and say so, rather than risk a clear_cart-
+            # sized mistake triggered by a "keep only" request.
+            reply_parts.append(
+                f"Couldn't find {', '.join(not_found_names)} in your cart, so I left it as is."
+                if not_found_names
+                else "I couldn't tell what to keep, so I left your cart as is."
+            )
+            return ChatResponse(
+                reply=" ".join(reply_parts),
+                intent=result.intent,
+                matches=[],
+                cart=to_cart_read(cart_items),
+                followup_question=result.parsed.followup_question,
+            )
+
+        keep_ids = {item.id for item in keep_items}
+        removed_count = 0
+        for item in cart_items:
+            if item.id not in keep_ids:
+                await db.delete(item)
+                removed_count += 1
+        await db.commit()
+        kept_names = [item.product.name_en for item in keep_items]
+        logger.info(f"[chat] keep_only_items: kept {kept_names}, removed {removed_count} other item(s)")
+
+        reply_parts.append(
+            f"Kept {', '.join(kept_names)} and removed {removed_count} other item(s) from your cart."
+            if removed_count
+            else f"Kept {', '.join(kept_names)} — nothing else was in your cart."
+        )
+        if not_found_names:
+            reply_parts.append(f"Couldn't find {', '.join(not_found_names)} to keep.")
+
+        return ChatResponse(
+            reply=" ".join(reply_parts),
+            intent=result.intent,
+            matches=[],
+            cart=to_cart_read(await load_cart(db, current_user.id)),
+            followup_question=result.parsed.followup_question,
+        )
+
     # Merge matched products into the user's real cart. Each upsert is
     # defensive on its own — one conflict (e.g. two ingredients resolving
     # to the same product and together exceeding stock) shouldn't drop the

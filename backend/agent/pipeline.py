@@ -312,11 +312,12 @@ async def run_agent(
         f"servings={parsed.servings} ingredients={len(parsed.ingredients)}"
     )
 
-    # remove_items/clear_cart target the user's existing CART, not the
-    # catalog — there's nothing here for match_product() to do. The router
-    # (routers/chat.py) handles the actual cart mutation using
-    # parsed.ingredients (still available via AgentResult.parsed below).
-    if parsed.intent in ("other", "remove_items", "clear_cart") or not parsed.ingredients:
+    # remove_items/clear_cart/keep_only_items target the user's existing
+    # CART, not the catalog — there's nothing here for match_product() to
+    # do. The router (routers/chat.py) handles the actual cart mutation
+    # using parsed.ingredients (still available via AgentResult.parsed
+    # below).
+    if parsed.intent in ("other", "remove_items", "clear_cart", "keep_only_items") or not parsed.ingredients:
         return AgentResult(
             reply=parsed.reply_context or "How can I help you shop today?",
             intent=parsed.intent,

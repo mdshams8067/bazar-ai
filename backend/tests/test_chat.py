@@ -79,6 +79,88 @@ async def test_chat_llm_unavailable_returns_friendly_message_not_500(
     assert "overloaded" in resp.json()["reply"].lower()
 
 
+async def test_chat_keep_only_items_removes_everything_else(
+    client: AsyncClient, seeded_products: list[Product], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: "only keep the rice, remove the rest" must remove
+    every OTHER cart item and leave the named one(s) alone — not clear the
+    whole cart, including the item the customer explicitly asked to keep."""
+    rice, _oil, eggs = seeded_products
+    token = await signup_user(client, email="keeponly@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    await client.post("/cart/items", json={"product_id": rice.id, "quantity": 1}, headers=headers)
+    await client.post("/cart/items", json={"product_id": eggs.id, "quantity": 1}, headers=headers)
+
+    async def fake_run_agent(message: str, db, history=None) -> AgentResult:
+        parsed = ParsedRequest(
+            intent="keep_only_items",
+            dish_name=None,
+            servings=None,
+            serving_unit="people",
+            budget_bdt=None,
+            ingredients=[ParsedIngredient(name_en="rice")],
+            reply_context="Keeping only the rice.",
+        )
+        return AgentResult(
+            reply="Keeping only the rice.",
+            intent="keep_only_items",
+            matches=[],
+            cart_actions=[],
+            totals={"subtotal_bdt": 0.0, "item_count": 0},
+            unmatched=[],
+            parsed=parsed,
+        )
+
+    monkeypatch.setattr(chat_module, "run_agent", fake_run_agent)
+
+    resp = await client.post("/chat", json={"message": "only keep the rice"}, headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cart"]["item_count"] == 1
+    assert body["cart"]["items"][0]["product"]["name_en"] == rice.name_en
+    assert "removed" in body["reply"].lower()
+
+
+async def test_chat_keep_only_items_with_no_match_leaves_cart_untouched(
+    client: AsyncClient, seeded_products: list[Product], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the named "keep" item doesn't match anything in the cart, refuse
+    to guess — leave the cart as is rather than risk emptying it."""
+    rice, _oil, eggs = seeded_products
+    token = await signup_user(client, email="keeponlymiss@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    await client.post("/cart/items", json={"product_id": rice.id, "quantity": 1}, headers=headers)
+    await client.post("/cart/items", json={"product_id": eggs.id, "quantity": 1}, headers=headers)
+
+    async def fake_run_agent(message: str, db, history=None) -> AgentResult:
+        parsed = ParsedRequest(
+            intent="keep_only_items",
+            dish_name=None,
+            servings=None,
+            serving_unit="people",
+            budget_bdt=None,
+            ingredients=[ParsedIngredient(name_en="nonexistent product")],
+            reply_context="Keeping only that item.",
+        )
+        return AgentResult(
+            reply="Keeping only that item.",
+            intent="keep_only_items",
+            matches=[],
+            cart_actions=[],
+            totals={"subtotal_bdt": 0.0, "item_count": 0},
+            unmatched=[],
+            parsed=parsed,
+        )
+
+    monkeypatch.setattr(chat_module, "run_agent", fake_run_agent)
+
+    resp = await client.post("/chat", json={"message": "only keep the nonexistent product"}, headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cart"]["item_count"] == 2
+    assert "left it as is" in body["reply"].lower()
+
+
 async def test_chat_cart_conflict_does_not_crash_whole_response(
     client: AsyncClient, seeded_products: list[Product], monkeypatch: pytest.MonkeyPatch
 ) -> None:

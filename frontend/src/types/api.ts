@@ -113,6 +113,7 @@ export type ChatIntent =
   | 'budget_dish'
   | 'remove_items'
   | 'clear_cart'
+  | 'keep_only_items'
   | 'other'
 
 export type MatchStatus =

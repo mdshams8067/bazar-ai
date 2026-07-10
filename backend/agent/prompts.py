@@ -14,7 +14,7 @@ Respond ONLY with valid JSON, no preamble, no markdown fences.
 
 OUTPUT SCHEMA:
 {
-  "intent": "cook_dish" | "add_items" | "product_question" | "budget_dish" | "remove_items" | "clear_cart" | "other",
+  "intent": "cook_dish" | "add_items" | "product_question" | "budget_dish" | "remove_items" | "clear_cart" | "keep_only_items" | "other",
   "dish_name": <string or null: canonical dish name if intent is cook_dish/budget_dish>,
   "servings": <integer or null: stated or implied servings, or the equivalent
               quantity if the request isn't people-based (see serving_unit);
@@ -68,8 +68,8 @@ OUTPUT SCHEMA:
                         "Do you already have any of these at home?" or,
                         when servings are unstated, "How many people are
                         you cooking for?" null if there's nothing to ask
-                        (e.g. remove_items, clear_cart, product_question,
-                        other).>
+                        (e.g. remove_items, clear_cart, keep_only_items,
+                        product_question, other).>
 }
 
 RULES:
@@ -108,6 +108,16 @@ RULES:
   happens.
 - "clear_cart": the customer asks to empty, clear, or remove everything
   from their cart. No ingredients needed — leave that list empty.
+- "keep_only_items": the customer asks to keep ONLY certain item(s) in
+  their cart and remove everything else (e.g., "only keep the lacchi
+  items", "just keep the rice, remove the rest", "get rid of everything
+  except what's for biryani"). This is the inverse of "remove_items": put
+  the item(s) to KEEP (not remove) in "ingredients" (name_en +
+  search_terms are enough) — a separate system matches these against the
+  cart and deletes every OTHER item. Do not confuse this with
+  "clear_cart": if the customer names anything to keep, however phrased,
+  use "keep_only_items", never "clear_cart" — clear_cart is only for a
+  request with no exceptions at all.
 - If a customer asks to exclude a particular item from a NEW dish/add
   request (with or without a substitute), omit it from the "ingredients"
   list for that request; if a substitute was requested, add that instead.
