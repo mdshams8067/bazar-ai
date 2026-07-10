@@ -45,7 +45,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('Loading order…'),
-              TextButton(onPressed: () => context.go('/orders'), child: const Text('← Back to orders')),
+              TextButton(onPressed: () => context.push('/orders'), child: const Text('← Back to orders')),
             ],
           ),
         ),

@@ -46,7 +46,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Future<void> _addToCart() async {
     final auth = context.read<AuthProvider>();
     if (!auth.isAuthenticated) {
-      context.go('/login?redirect=${Uri.encodeComponent('/products/${widget.productId}')}');
+      context.push('/login?redirect=${Uri.encodeComponent('/products/${widget.productId}')}');
       return;
     }
     setState(() {
@@ -72,7 +72,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       return Scaffold(
         appBar: AppBar(title: const Text('Product not found')),
         body: Center(
-          child: TextButton(onPressed: () => context.go('/products'), child: const Text('Back to products')),
+          child: TextButton(onPressed: () => context.push('/products'), child: const Text('Back to products')),
         ),
       );
     }

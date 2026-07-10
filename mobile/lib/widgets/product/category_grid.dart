@@ -34,7 +34,7 @@ class CategoryGrid extends StatelessWidget {
       itemBuilder: (context, i) {
         final entry = categoryIcons.entries.elementAt(i);
         return InkWell(
-          onTap: () => context.go('/products?category=${Uri.encodeComponent(entry.key)}'),
+          onTap: () => context.push('/products?category=${Uri.encodeComponent(entry.key)}'),
           child: Container(
             decoration: BoxDecoration(
               color: AppColors.paper,

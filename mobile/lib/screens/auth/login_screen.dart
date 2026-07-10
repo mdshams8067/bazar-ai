@@ -68,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 16),
             Center(
               child: TextButton(
-                onPressed: () => context.go('/signup?redirect=${Uri.encodeComponent(widget.redirect)}'),
+                onPressed: () => context.push('/signup?redirect=${Uri.encodeComponent(widget.redirect)}'),
                 child: const Text('New to Bazar AI? Create an account'),
               ),
             ),

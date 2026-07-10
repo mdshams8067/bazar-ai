@@ -19,7 +19,7 @@ from models.product import Product
 
 logger = logging.getLogger(__name__)
 
-FUZZY_THRESHOLD = 85
+FUZZY_THRESHOLD = 70
 
 # unit -> (dimension, base-unit multiplier). Base units: gram, ml, piece.
 _UNIT_BASE: dict[str, tuple[str, float]] = {
@@ -248,8 +248,22 @@ def score_candidates(
 
 
 def fuzzy_match(pool: list[Product], search_terms: list[str]) -> list[Product]:
-    """Fallback fuzzy match (rapidfuzz partial_ratio > threshold) used only
-    when exact substring matching finds nothing."""
+    """Fallback fuzzy match (rapidfuzz token_sort_ratio > threshold) used
+    only when exact substring matching finds nothing.
+
+    Deliberately NOT partial_ratio: it scores on the best-aligned
+    substring window, so a short term that merely shares one common word
+    with a long, otherwise-unrelated product name scores deceptively
+    high — e.g. "fish roe" against "Koi Fish Process Cultured" scored
+    87.5 (past the old 85 threshold) purely because both contain "fish";
+    the rest of "roe" vs. "process cultured" never factored in, so
+    caviar silently matched an ornamental pond fish. token_sort_ratio
+    compares the full strings (word order normalized), which scores that
+    same pair at ~33 — correctly rejecting it — while still scoring a
+    genuine near-miss like "chinigura rice" against "ACI Chinigura Rice
+    1kg" at ~78, well clear of the lowered 70 threshold this scorer
+    needs (its "genuinely similar" scores run lower than partial_ratio's
+    did, since it isn't grading on the single best-matching window)."""
     terms_lower = [t.lower() for t in search_terms if t]
     if not terms_lower:
         return []
@@ -257,7 +271,7 @@ def fuzzy_match(pool: list[Product], search_terms: list[str]) -> list[Product]:
     scored: list[tuple[float, Product]] = []
     for p in pool:
         name_lower = p.name_en.lower()
-        best_ratio = max(fuzz.partial_ratio(term, name_lower) for term in terms_lower)
+        best_ratio = max(fuzz.token_sort_ratio(term, name_lower) for term in terms_lower)
         if best_ratio > FUZZY_THRESHOLD:
             scored.append((best_ratio, p))
 

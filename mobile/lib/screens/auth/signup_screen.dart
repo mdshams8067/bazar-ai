@@ -129,7 +129,7 @@ class _SignupScreenState extends State<SignupScreen> {
             const SizedBox(height: 16),
             Center(
               child: TextButton(
-                onPressed: () => context.go('/login?redirect=${Uri.encodeComponent(widget.redirect)}'),
+                onPressed: () => context.push('/login?redirect=${Uri.encodeComponent(widget.redirect)}'),
                 child: const Text('Already have an account? Sign in'),
               ),
             ),

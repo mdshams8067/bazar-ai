@@ -16,7 +16,10 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
     final cart = context.watch<CartProvider>().cart;
 
     return AppBar(
-      title: const Text('Bazar AI'),
+      title: GestureDetector(
+        onTap: () => context.go('/'),
+        child: const Text('Bazar AI'),
+      ),
       actions: [
         IconButton(
           tooltip: 'Ask Bazar Buddy',
@@ -28,7 +31,7 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
           children: [
             IconButton(
               icon: const Icon(Icons.shopping_cart_outlined),
-              onPressed: () => context.go('/cart'),
+              onPressed: () => context.push('/cart'),
             ),
             if (cart != null && cart.itemCount > 0)
               Positioned(
@@ -45,7 +48,7 @@ class AppHeader extends StatelessWidget implements PreferredSizeWidget {
           ],
         ),
         TextButton(
-          onPressed: () => context.go(auth.isAuthenticated ? '/account' : '/login'),
+          onPressed: () => context.push(auth.isAuthenticated ? '/account' : '/login'),
           child: Text(auth.isAuthenticated ? (auth.user?.name.split(' ').first ?? 'Account') : 'Sign in'),
         ),
       ],
