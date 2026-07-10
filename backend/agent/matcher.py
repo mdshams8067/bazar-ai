@@ -372,7 +372,10 @@ def _apply_specific_variant_check(ingredient: ParsedIngredient, match: Match) ->
 
 
 def match_product(
-    ingredient: ParsedIngredient, catalog: list[Product], query_embedding: list[float] | None = None
+    ingredient: ParsedIngredient,
+    catalog: list[Product],
+    query_embedding: list[float] | None = None,
+    query_embedding_model: str | None = None,
 ) -> Match:
     """Matches one ingredient to a real catalog product, deterministically.
 
@@ -391,17 +394,22 @@ def match_product(
     - top tier is entirely out of stock -> hand off to find_substitute()
       for the wider brand/functional/skip cascade.
 
-    query_embedding (optional, precomputed by pipeline.py's run_agent when
-    ENABLE_EMBEDDING_MATCH is on): a Layer-1 addition, purely widening the
-    candidate net alongside fuzzy_match for genuine vocabulary mismatches
-    (e.g. "chickpea flour" vs. the catalog's "BPM Gram Flour 500gm" — zero
-    shared substring, well under fuzzy_match's threshold, but obviously the
-    same thing). Every decision below this point (stock, price, size fit,
-    substitution tiers) is the same regardless of which tier a candidate
-    came from — this only ever adds candidates, never removes or
-    reprioritizes ones exact/fuzzy already found. When query_embedding is
-    None (the default — no config change needed to keep today's exact
-    behavior), this is a no-op and the cascade is byte-for-byte unchanged."""
+    query_embedding/query_embedding_model (optional, precomputed by
+    pipeline.py's run_agent when ENABLE_EMBEDDING_MATCH is on): a Layer-1
+    addition, purely widening the candidate net alongside fuzzy_match for
+    genuine vocabulary mismatches (e.g. "chickpea flour" vs. the catalog's
+    "BPM Gram Flour 500gm" — zero shared substring, well under
+    fuzzy_match's threshold, but obviously the same thing). Every decision
+    below this point (stock, price, size fit, substitution tiers) is the
+    same regardless of which tier a candidate came from — this only ever
+    adds candidates, never removes or reprioritizes ones exact/fuzzy
+    already found. query_embedding_model travels with the vector because
+    Gemini API-key/model rotation (core/gemini_client.py) can mean this
+    particular query was embedded with a different model than most of the
+    catalog — embedding_candidates() only ever compares same-model vectors,
+    see agent/embedding_match.py. When query_embedding is None (the
+    default — no config change needed to keep today's exact behavior),
+    this is a no-op and the cascade is byte-for-byte unchanged."""
     pool = [p for p in catalog if p.category == ingredient.category_hint]
     if not pool:
         pool = catalog
@@ -410,10 +418,10 @@ def match_product(
     if not scored:
         fuzzy_candidates = fuzzy_match(pool, ingredient.search_terms)
         combined = fuzzy_candidates
-        if query_embedding is not None:
+        if query_embedding is not None and query_embedding_model is not None:
             from agent.embedding_match import embedding_candidates
 
-            embed_candidates = embedding_candidates(query_embedding, pool)
+            embed_candidates = embedding_candidates(query_embedding, query_embedding_model, pool)
             if embed_candidates:
                 seen_ids = {p.id for p in fuzzy_candidates}
                 new_from_embedding = [p for p in embed_candidates if p.id not in seen_ids]

@@ -9,7 +9,10 @@ whenever new products are added. Safe to re-run any time: by default only
 fills in products with no embedding yet (see backfill()'s only_missing
 param), so re-running after a partial run (e.g. a quota wall — see
 PROJECT_CONTEXT.md) or on a growing catalog never wastes quota re-embedding
-what already succeeded.
+what already succeeded. Each product also records which model actually
+embedded it (embedding_model — core/gemini_client.py can rotate models
+mid-run), since agent/embedding_match.py must never compare vectors from
+two different embedding models.
 
 Run as a script: `python -m seed.embed_products` from backend/ (venv active).
 """
@@ -49,9 +52,10 @@ def backfill(only_missing: bool = True) -> int:
         products = query.all()
         for start in range(0, len(products), _BATCH_SIZE):
             batch = products[start : start + _BATCH_SIZE]
-            vectors = embed_texts([p.name_en for p in batch])
-            for product, vector in zip(batch, vectors):
+            results = embed_texts([p.name_en for p in batch])
+            for product, (vector, model) in zip(batch, results):
                 product.embedding = vector
+                product.embedding_model = model
             db.commit()
             logger.info(f"Embedded {start + len(batch)}/{len(products)} products")
     finally:

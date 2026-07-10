@@ -29,3 +29,11 @@ class Product(Base):
     # would break this project's SQLite-local/Postgres-prod parity. Null
     # until seed/embed_products.py backfills it.
     embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    # Which embedding model actually produced `embedding` — rotation
+    # (core/gemini_client.py) can fall back from EMBEDDING_MODEL to
+    # EMBEDDING_MODEL_FALLBACK mid-backfill (or mid-session, for a query
+    # embedding), and two models' vectors aren't guaranteed comparable even
+    # at the same dimension. agent/embedding_match.py only ever compares a
+    # query embedding against product embeddings tagged with this same
+    # value, never across models.
+    embedding_model: Mapped[str | None] = mapped_column(String, nullable=True)

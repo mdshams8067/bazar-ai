@@ -157,29 +157,36 @@ async def _call_llm_for_json(user_message: str) -> dict:
         return _extract_json(raw_retry)  # a second failure propagates as-is
 
 
-async def _embed_ingredients(ingredients: list[ParsedIngredient]) -> dict[int, list[float]]:
+async def _embed_ingredients(ingredients: list[ParsedIngredient]) -> dict[int, tuple[list[float], str]]:
     """One batched embedding call for every ingredient in this message (not
     per-ingredient, not per-message-turn) — the Layer-1 retrieval addition
     described in match_product()'s docstring. Failure here (rate limit,
     provider outage) degrades to exact/fuzzy-only matching rather than
     failing the whole chat turn, since this is strictly a wider net, never
-    the only way a match can succeed."""
+    the only way a match can succeed.
+
+    Each ingredient's result carries the model that actually embedded it
+    (core/gemini_client.py's key/model rotation means different ingredients
+    in the same batch — or the same ingredient on a different day — can
+    come back tagged with different models); match_product() and
+    embedding_candidates() key off that per-ingredient model, never assume
+    one model for the whole call."""
     from core.embeddings import aembed_texts
 
     texts = [f"{ing.name_en} {' '.join(ing.search_terms)}".strip() for ing in ingredients]
     try:
-        vectors = await aembed_texts(texts)
+        results = await aembed_texts(texts)
     except Exception:
         logger.exception("[pipeline] embedding lookup failed; continuing with exact/fuzzy matching only")
         return {}
-    return {id(ing): vec for ing, vec in zip(ingredients, vectors)}
+    return {id(ing): result for ing, result in zip(ingredients, results)}
 
 
 def _match_ingredients(
     ingredients: list[ParsedIngredient],
     catalog: list[Product],
     ask_pack_size: bool = False,
-    query_embeddings: dict[int, list[float]] | None = None,
+    query_embeddings: dict[int, tuple[list[float], str]] | None = None,
 ) -> list[Match]:
     """Matches every ingredient; a failure on one never aborts the rest.
 
@@ -192,11 +199,11 @@ def _match_ingredients(
     clarifying question per ingredient there would mean answering half a
     dozen questions to get a bowl of polao going.
 
-    query_embeddings (optional): id(ingredient) -> precomputed embedding
-    vector, computed once up front in run_agent (a single batched async
-    API call) rather than per ingredient here — this loop, and
-    match_product() itself, stay fully synchronous either way. See
-    match_product's own docstring for what this actually changes.
+    query_embeddings (optional): id(ingredient) -> (embedding vector,
+    model that produced it), computed once up front in run_agent (a
+    single batched async API call) rather than per ingredient here — this
+    loop, and match_product() itself, stay fully synchronous either way.
+    See match_product's own docstring for what this actually changes.
     """
     matches = []
     for ing in ingredients:
@@ -213,8 +220,12 @@ def _match_ingredients(
                         )
                     )
                     continue
-            query_embedding = (query_embeddings or {}).get(id(ing))
-            matches.append(match_product(ing, catalog, query_embedding=query_embedding))
+            query_embedding, query_embedding_model = (query_embeddings or {}).get(id(ing), (None, None))
+            matches.append(
+                match_product(
+                    ing, catalog, query_embedding=query_embedding, query_embedding_model=query_embedding_model
+                )
+            )
         except Exception:
             logger.exception(f"[pipeline] matching failed for ingredient: {ing.name_en}")
             matches.append(
@@ -436,7 +447,7 @@ async def run_agent(
 
     catalog = list((await db.execute(select(Product))).scalars().all())
 
-    query_embeddings: dict[int, list[float]] = {}
+    query_embeddings: dict[int, tuple[list[float], str]] = {}
     if ENABLE_EMBEDDING_MATCH and parsed.ingredients:
         query_embeddings = await _embed_ingredients(parsed.ingredients)
 

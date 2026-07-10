@@ -63,8 +63,43 @@ class Settings(BaseSettings):
     LLM_FALLBACK_PROVIDER: str = "groq"
 
     # ── Gemini ────────────────────────────────────────────────────────────
+    # Primary key, kept as a single scalar for backward compatibility with
+    # every existing .env. Additional keys (optional) go in
+    # GOOGLE_API_KEYS_EXTRA, comma-separated — see GEMINI_API_KEYS below,
+    # the actual combined list core/gemini_client.py rotates through when
+    # one key gets rate-limited (a free-tier key's quota, per-key and
+    # per-model, is a real thing this project has hit live — see
+    # PROJECT_CONTEXT.md). Used by both the chat LLM (core/llm.py) and the
+    # embedding matcher addition (core/embeddings.py) — one shared pool of
+    # keys, since both draw from the same Gemini account/quota.
     GOOGLE_API_KEY: str = ""
+    GOOGLE_API_KEYS_EXTRA: Annotated[list[str], NoDecode] = []
     GEMINI_TEXT_MODEL: str = "gemini-3.1-flash-lite"
+    # Tried, same key, before rotating to the next key — same reasoning as
+    # EMBEDDING_MODEL_FALLBACK below. Defaults are real models confirmed
+    # working against this project's own Gemini account (verified live,
+    # not guessed from a model-name list): gemini-flash-lite-latest is an
+    # auto-updating alias close to the primary's own tier, the other two
+    # are a genuinely different model generation/tier as a further
+    # backstop. A few plausible-looking candidates were tried and rejected
+    # live: gemini-2.5-flash/-flash-lite are deprecated for new API keys
+    # ("no longer available to new users"), gemini-2.0-flash/-flash-lite
+    # and gemini-3.1-pro-preview returned 429s immediately (zero granted
+    # quota on this account's tier, not a transient rate limit).
+    GEMINI_TEXT_MODELS_FALLBACK: Annotated[list[str], NoDecode] = [
+        "gemini-flash-lite-latest",
+        "gemini-3-flash-preview",
+        "gemini-3.5-flash",
+    ]
+
+    @field_validator(
+        "GOOGLE_API_KEYS_EXTRA", "GEMINI_TEXT_MODELS_FALLBACK", "GROQ_TEXT_MODELS_FALLBACK", mode="before"
+    )
+    @classmethod
+    def _split_comma_list(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
 
     # ── Matcher: embedding-based retrieval (Layer 1) ──────────────────────
     # When the exact/fuzzy keyword cascade in agent/matcher.py finds nothing,
@@ -77,10 +112,29 @@ class Settings(BaseSettings):
     # needed, if it ever needs to be pulled out.
     ENABLE_EMBEDDING_MATCH: bool = False
     EMBEDDING_MODEL: str = "gemini-embedding-001"
+    # Tried, same API key, before rotating to the next key (see
+    # core/gemini_client.py) — a separate model on the same key has its own
+    # quota bucket, so this is a free extra attempt before burning a key
+    # switch. (The chat LLM's equivalent list is GEMINI_TEXT_MODELS_FALLBACK
+    # above — kept separate since an embedding model and a chat model are
+    # never interchangeable.)
+    EMBEDDING_MODEL_FALLBACK: str = "gemini-embedding-2"
 
     # ── Groq ──────────────────────────────────────────────────────────────
     GROQ_API_KEY: str = ""
     GROQ_TEXT_MODEL: str = "qwen/qwen3-32b"
+    # Same idea as GEMINI_TEXT_MODELS_FALLBACK, one provider over: tried in
+    # order before giving up on Groq entirely (Groq is already the final
+    # fallback after every Gemini key/model is exhausted — see
+    # LLM_FALLBACK_PROVIDER below). Defaults verified working live against
+    # this project's own Groq account. `openai/gpt-oss-20b` was tried and
+    # excluded: it returned an empty string rather than an error or real
+    # content, a silent-failure shape worse than not trying it at all.
+    GROQ_TEXT_MODELS_FALLBACK: Annotated[list[str], NoDecode] = [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+    ]
 
     # ── SSLCommerz (payment gateway) ──────────────────────────────────────
     # Defaults are SSLCommerz's own publicly documented sandbox demo-store
@@ -112,11 +166,20 @@ CORS_ORIGINS = settings.CORS_ORIGINS
 LLM_PROVIDER = settings.LLM_PROVIDER
 LLM_FALLBACK_PROVIDER = settings.LLM_FALLBACK_PROVIDER
 GOOGLE_API_KEY = settings.GOOGLE_API_KEY
+GOOGLE_API_KEYS_EXTRA = settings.GOOGLE_API_KEYS_EXTRA
 GEMINI_TEXT_MODEL = settings.GEMINI_TEXT_MODEL
+GEMINI_TEXT_MODELS_FALLBACK = settings.GEMINI_TEXT_MODELS_FALLBACK
+# The actual list core/gemini_client.py rotates through: primary key first
+# (so existing single-key setups are unaffected), then any extras,
+# deduplicated in case the same key was pasted into both settings by
+# mistake, blanks dropped.
+GEMINI_API_KEYS = list(dict.fromkeys(k for k in [GOOGLE_API_KEY, *GOOGLE_API_KEYS_EXTRA] if k))
 ENABLE_EMBEDDING_MATCH = settings.ENABLE_EMBEDDING_MATCH
 EMBEDDING_MODEL = settings.EMBEDDING_MODEL
+EMBEDDING_MODEL_FALLBACK = settings.EMBEDDING_MODEL_FALLBACK
 GROQ_API_KEY = settings.GROQ_API_KEY
 GROQ_TEXT_MODEL = settings.GROQ_TEXT_MODEL
+GROQ_TEXT_MODELS_FALLBACK = settings.GROQ_TEXT_MODELS_FALLBACK
 SSLCOMMERZ_STORE_ID = settings.SSLCOMMERZ_STORE_ID
 SSLCOMMERZ_STORE_PASSWORD = settings.SSLCOMMERZ_STORE_PASSWORD
 SSLCOMMERZ_API_URL = settings.SSLCOMMERZ_API_URL

@@ -3,7 +3,15 @@ core/llm.py — Provider-agnostic LLM wrapper.
 
 Configure via .env:
   LLM_PROVIDER=gemini            (primary, default)
-  LLM_FALLBACK_PROVIDER=groq     (used automatically if the primary is rate-limited)
+  LLM_FALLBACK_PROVIDER=groq     (used automatically if every Gemini key/model is rate-limited)
+
+Within each provider, there's a second layer of fallback before ever
+reaching the other provider: Gemini rotates across every key in
+GOOGLE_API_KEY/GOOGLE_API_KEYS_EXTRA and every model in GEMINI_TEXT_MODEL +
+GEMINI_TEXT_MODELS_FALLBACK (core/gemini_client.py); Groq rotates across
+GROQ_TEXT_MODEL + GROQ_TEXT_MODELS_FALLBACK. Only once a provider's entire
+key x model matrix is exhausted does this module fail over to the other
+provider.
 
 All agents call llm.chat() (or the async llm.achat()) — never the SDK directly.
 Retry logic for transient 503 errors, and failover on 429 rate limits, lives
@@ -24,8 +32,8 @@ from pathlib import Path
 
 from core.config import (
     LLM_PROVIDER, LLM_FALLBACK_PROVIDER,
-    GOOGLE_API_KEY, GEMINI_TEXT_MODEL,
-    GROQ_API_KEY, GROQ_TEXT_MODEL,
+    GEMINI_TEXT_MODEL, GEMINI_TEXT_MODELS_FALLBACK,
+    GROQ_API_KEY, GROQ_TEXT_MODEL, GROQ_TEXT_MODELS_FALLBACK,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,38 +145,48 @@ def _gemini_chat(system: str, user: str, max_tokens: int, temperature: float) ->
     from google.genai import types as genai_types
     from google.genai import errors as genai_errors
 
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    from core.gemini_client import GeminiAllKeysExhausted, call_with_rotation
 
-    def _call() -> str:
-        response = client.models.generate_content(
-            model=GEMINI_TEXT_MODEL,
-            contents=user,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system,
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
-            ),
-        )
-        return response.text.strip()
+    def _make_call(api_key: str, model: str) -> str:
+        client = genai.Client(api_key=api_key)
 
-    for attempt in range(3):
-        try:
-            return _call()
-        except genai_errors.ClientError as e:
-            if e.code == 429 or e.status == "RESOURCE_EXHAUSTED":
-                logger.warning(f"[LLM] Gemini rate-limited, quick retry in 2s: {e}")
-                time.sleep(2)
-                try:
-                    return _call()
-                except genai_errors.ClientError as e2:
-                    raise _RateLimited(str(e2)) from e2
-            raise
-        except genai_errors.ServerError as e:
-            wait = 30 * (attempt + 1)
-            logger.warning(f"[LLM] Gemini 503, retrying in {wait}s: {e}")
-            time.sleep(wait)
-    raise RuntimeError("Gemini unavailable after 3 retries")
+        def _call() -> str:
+            response = client.models.generate_content(
+                model=model,
+                contents=user,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system,
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                    thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                ),
+            )
+            return response.text.strip()
+
+        # 503s are a Gemini service-health issue, not a quota one — retrying
+        # a different key/model wouldn't help, so this stays a same-attempt
+        # backoff retry rather than triggering rotation (genai_errors.
+        # ServerError isn't a ClientError, so call_with_rotation never sees
+        # it — it's handled here, same as before multi-key rotation existed).
+        for attempt in range(3):
+            try:
+                return _call()
+            except genai_errors.ServerError as e:
+                wait = 30 * (attempt + 1)
+                logger.warning(f"[LLM] Gemini 503, retrying in {wait}s: {e}")
+                time.sleep(wait)
+        raise RuntimeError("Gemini unavailable after 3 retries (503)")
+
+    # Every model in GEMINI_TEXT_MODELS_FALLBACK is tried on each key before
+    # rotating to the next key (see call_with_rotation's own docstring for
+    # why that order). Once every key x model combination is exhausted,
+    # this becomes a _RateLimited (this module's own signal), which
+    # chat()'s caller already knows how to fail over from (Groq).
+    try:
+        result, _ = call_with_rotation(_make_call, models=[GEMINI_TEXT_MODEL, *GEMINI_TEXT_MODELS_FALLBACK])
+        return result
+    except GeminiAllKeysExhausted as e:
+        raise _RateLimited(str(e)) from e
 
 
 # ── Groq ──────────────────────────────────────────────────────────────────────
@@ -179,9 +197,9 @@ def _groq_chat(system: str, user: str, max_tokens: int, temperature: float) -> s
 
     client = Groq(api_key=GROQ_API_KEY)
 
-    def _call() -> str:
+    def _call(model: str) -> str:
         response = client.chat.completions.create(
-            model=GROQ_TEXT_MODEL,
+            model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -193,18 +211,33 @@ def _groq_chat(system: str, user: str, max_tokens: int, temperature: float) -> s
         # Qwen3 models may prepend a <think>...</think> reasoning block.
         return _THINK_BLOCK_RE.sub("", text).strip()
 
-    for attempt in range(3):
+    # Same rotation shape as Gemini's (core/gemini_client.py), just Groq's
+    # own SDK exception types: try every model in order, moving on
+    # immediately on a rate limit OR a "model not found" (groq.NotFoundError
+    # — a fallback list will inevitably go stale as models get deprecated;
+    # one bad entry should be skipped, not take down the whole chat turn);
+    # a 500 gets a same-model backoff retry first (a real service blip, not
+    # a quota/availability one) before also moving on to the next model
+    # rather than giving up on Groq entirely.
+    models = [GROQ_TEXT_MODEL, *GROQ_TEXT_MODELS_FALLBACK]
+    last_error: Exception | None = None
+    for model in models:
         try:
-            return _call()
+            for attempt in range(3):
+                try:
+                    return _call(model)
+                except groq.InternalServerError as e:
+                    wait = 30 * (attempt + 1)
+                    logger.warning(f"[LLM] Groq 503 on {model}, retrying in {wait}s: {e}")
+                    time.sleep(wait)
+            logger.warning(f"[LLM] Groq {model} unavailable after 3 retries (503), trying next model")
         except groq.RateLimitError as e:
-            logger.warning(f"[LLM] Groq rate-limited, quick retry in 2s: {e}")
-            time.sleep(2)
-            try:
-                return _call()
-            except groq.RateLimitError as e2:
-                raise _RateLimited(str(e2)) from e2
-        except groq.InternalServerError as e:
-            wait = 30 * (attempt + 1)
-            logger.warning(f"[LLM] Groq 503, retrying in {wait}s: {e}")
-            time.sleep(wait)
-    raise RuntimeError("Groq unavailable after 3 retries")
+            logger.warning(f"[LLM] Groq {model} rate-limited, trying next model: {e}")
+            last_error = e
+            continue
+        except groq.NotFoundError as e:
+            logger.warning(f"[LLM] Groq {model} not found/no access, trying next model: {e}")
+            last_error = e
+            continue
+
+    raise _RateLimited(str(last_error) if last_error else f"Groq: all {len(models)} model(s) exhausted (503)")
