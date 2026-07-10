@@ -1,0 +1,48 @@
+name: mobile
+description: "Bazar AI — Flutter client for the Bazar AI grocery app and Bazar Buddy assistant."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.6.0
+  dio: ^5.7.0
+  provider: ^6.1.2
+  go_router: ^14.6.0
+  webview_flutter: ^4.10.0
+  uuid: ^4.5.3
+  intl: ^0.19.0
+  cached_network_image: ^3.4.1
+  flutter_dotenv: ^5.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/.env
+
+  fonts:
+    - family: CooperHewitt
+      fonts:
+        - asset: assets/fonts/cooper-hewitt-600.ttf
+          weight: 600
+        - asset: assets/fonts/cooper-hewitt-700.ttf
+          weight: 700
+        - asset: assets/fonts/cooper-hewitt-800.ttf
+          weight: 800
+    - family: ChangaOne
+      fonts:
+        - asset: assets/fonts/changa-one-400.ttf
+          weight: 400

@@ -33,6 +33,22 @@ FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in pro
 
 React + Vite + Tailwind, installable as a PWA. Product browsing, cart, checkout, order history, and a Bazar Buddy chat widget available from anywhere in the app.
 
+## Mobile app (Flutter)
+
+A native Android client (`mobile/`) with full feature parity with the web app — auth, catalog browsing, cart, Bazar Buddy chat (match cards, pack-size picker, quick-reply scaling), checkout (cash on delivery and SSLCommerz), and order history/tracking. It's a second client of the exact same backend and Supabase project as the web app — no separate database, no duplicated auth system, same REST API. The same Cooper Hewitt/Changa One fonts and color palette are ported into Flutter's `ThemeData` rather than falling back to Material defaults.
+
+The one genuinely tricky part: SSLCommerz's hosted checkout page redirects to a *web* URL on completion (`{FRONTEND_URL}/order-confirmation/{id}?payment=...`), since there's no mobile deep link wired up server-side. The mobile app shows that page in an in-app WebView and detects completion by matching the WebView's navigation requests against that URL pattern (path + query only, so it's host-agnostic), then routes to its own native confirmation screen instead of letting the web page load — verified working end-to-end against the real SSLCommerz sandbox on a real emulator run.
+
+**Build and run:**
+```bash
+cd mobile
+flutter pub get
+cp assets/.env.example assets/.env   # fill in SUPABASE_URL, SUPABASE_ANON_KEY (same values as frontend/.env.local)
+flutter run                          # or: flutter build apk --release
+```
+
+**iOS is not built in this submission** — Xcode (required for any iOS build, including just running on the iOS simulator) only runs on macOS, and this was developed on Linux. This is a hard toolchain constraint, not a scope cut: the Dart/Flutter codebase itself is entirely platform-agnostic and would build for iOS unmodified given access to a Mac.
+
 ## Deployment
 
 Frontend on Vercel, backend on Render, database + auth on Supabase — each is running that stack's free tier. This isn't production yet, just a take-home submission, so free tier is the right call for now; an actual production launch would need to upgrade off it (Render's free tier in particular — see the cold-start limitation below).
@@ -72,3 +88,4 @@ npm run dev
 
 - **Signup email confirmation runs on Supabase's default shared email sender, not a custom SMTP provider.** That sender is capped at just 2 emails/hour by default — fine for this project's expected signup volume, but a real production launch should configure a custom SMTP provider (Resend, Postmark, etc.) in Supabase's Auth settings instead, both to lift that limit and to get proper bounce/complaint tracking under your own sending reputation rather than Supabase's shared one.
 - **Backend cold starts on Render's free tier** after ~15 minutes of inactivity — the first request afterward can take up to ~50 seconds. The frontend polls `/health` and shows a "waking up" banner rather than hiding the delay.
+- **The Flutter mobile app doesn't build for iOS in this submission** — Xcode is required and only runs on macOS; this was built on Linux. The codebase itself is platform-agnostic and needs no changes to build for iOS given a Mac.
