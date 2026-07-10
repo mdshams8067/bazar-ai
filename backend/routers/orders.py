@@ -12,7 +12,7 @@ from core.security import get_current_user
 from models.cart_item import CartItem
 from models.order import Order, OrderStatus
 from models.order_item import OrderItem
-from models.user import User
+from models.profile import Profile
 from schemas.order import OrderCreate, OrderListRead, OrderRead, OrderStatusUpdate
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -28,7 +28,7 @@ _NEXT_STATUS = {
 async def create_order(
     payload: OrderCreate | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> Order:
     """Creates an order from the current cart: validates stock, snapshots
     price/name and decrements stock, clears the cart — all in one
@@ -91,7 +91,7 @@ async def list_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> OrderListRead:
     base_query = select(Order).where(Order.user_id == current_user.id)
     total = await db.scalar(select(func.count()).select_from(base_query.subquery()))
@@ -109,7 +109,7 @@ async def list_orders(
 async def get_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> Order:
     order = await db.get(Order, order_id, options=[selectinload(Order.items)])
     # 404, not 403, on a mismatched owner — don't confirm the ID exists to
@@ -124,7 +124,7 @@ async def update_order_status(
     order_id: int,
     payload: OrderStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> Order:
     """Simulates status progression (pending -> confirmed -> delivered).
     No real fulfillment behind this — a demo transition endpoint, not

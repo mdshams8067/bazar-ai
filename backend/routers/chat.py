@@ -29,7 +29,7 @@ from core.database import get_db
 from core.llm import LLMUnavailableError
 from core.security import get_current_user
 from models.cart_item import AddedVia, CartItem
-from models.user import User
+from models.profile import Profile
 from routers.cart import load_cart, to_cart_read, upsert_cart_item
 from schemas.cart import CartRead
 from schemas.product import ProductRead
@@ -120,7 +120,7 @@ def _find_cart_item_matches(ingredient: ParsedIngredient, cart_items: list[CartI
 async def chat(
     payload: ChatRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> ChatResponse:
     try:
         history = [turn.model_dump() for turn in payload.history]

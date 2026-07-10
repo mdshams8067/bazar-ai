@@ -35,7 +35,7 @@ from core.database import get_db
 from core.security import get_current_user
 from core.sslcommerz import SslcommerzError, create_session, validate_transaction
 from models.order import Order, OrderStatus
-from models.user import User
+from models.profile import Profile
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ router = APIRouter(prefix="/payment/sslcommerz", tags=["payment"])
 async def init_payment(
     order_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> dict:
     order = await db.get(Order, order_id)
     if order is None or order.user_id != current_user.id:

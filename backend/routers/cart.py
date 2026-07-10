@@ -2,6 +2,8 @@
 auth; the user id always comes from the token, never the request body."""
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,13 +13,13 @@ from core.database import get_db
 from core.security import get_current_user
 from models.cart_item import AddedVia, CartItem
 from models.product import Product
-from models.user import User
+from models.profile import Profile
 from schemas.cart import CartItemCreate, CartItemRead, CartItemUpdate, CartRead
 
 router = APIRouter(prefix="/cart", tags=["cart"])
 
 
-async def load_cart(db: AsyncSession, user_id: int) -> list[CartItem]:
+async def load_cart(db: AsyncSession, user_id: uuid.UUID) -> list[CartItem]:
     """Reused by routers/chat.py to return the cart's post-merge state."""
     result = await db.execute(
         select(CartItem)
@@ -38,7 +40,7 @@ def to_cart_read(items: list[CartItem]) -> CartRead:
 async def upsert_cart_item(
     db: AsyncSession,
     *,
-    user_id: int,
+    user_id: uuid.UUID,
     product_id: int,
     quantity: int,
     added_via: AddedVia = AddedVia.manual,
@@ -89,7 +91,7 @@ async def upsert_cart_item(
 
 @router.get("", response_model=CartRead)
 async def get_cart(
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db), current_user: Profile = Depends(get_current_user)
 ) -> CartRead:
     return to_cart_read(await load_cart(db, current_user.id))
 
@@ -98,7 +100,7 @@ async def get_cart(
 async def add_cart_item(
     payload: CartItemCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> CartRead:
     await upsert_cart_item(
         db,
@@ -117,7 +119,7 @@ async def update_cart_item(
     item_id: int,
     payload: CartItemUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> CartRead:
     item = await db.get(CartItem, item_id)
     if item is None or item.user_id != current_user.id:
@@ -143,7 +145,7 @@ async def update_cart_item(
 async def delete_cart_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: Profile = Depends(get_current_user),
 ) -> CartRead:
     item = await db.get(CartItem, item_id)
     if item is None or item.user_id != current_user.id:
@@ -156,7 +158,7 @@ async def delete_cart_item(
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def clear_cart(
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db), current_user: Profile = Depends(get_current_user)
 ) -> None:
     for item in await load_cart(db, current_user.id):
         await db.delete(item)

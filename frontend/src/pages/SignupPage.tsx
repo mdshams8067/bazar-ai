@@ -47,7 +47,13 @@ export function SignupPage() {
       await signup({ name, email, password })
       navigate(params.get('redirect') || '/')
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : 'Could not create your account')
+      // Supabase's own SDK throws plain Errors (its own message is already
+      // meaningful — "User already registered", "Password should be at
+      // least 6 characters", etc.) — ApiError only ever comes from our
+      // own backend, which no longer handles signup at all.
+      if (err instanceof ApiError) setError(err.detail)
+      else if (err instanceof Error) setError(err.message)
+      else setError('Could not create your account')
     } finally {
       setSubmitting(false)
     }
@@ -75,6 +81,7 @@ export function SignupPage() {
             onChange={(e) => setEmail(e.target.value)}
             className="mt-1 w-full rounded-button border border-line px-3 py-2"
           />
+          <span className="font-dense mt-1 block text-xs text-ink-muted">Use a valid email address.</span>
         </label>
         <label className="text-sm font-semibold text-ink">
           Password

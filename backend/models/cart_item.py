@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 import enum
+import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
 
 if TYPE_CHECKING:
     from models.product import Product
-    from models.user import User
+    from models.profile import Profile
 
 
 class AddedVia(str, enum.Enum):
@@ -25,7 +26,9 @@ class CartItem(Base):
     __table_args__ = (UniqueConstraint("user_id", "product_id", name="uq_cart_user_product"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     added_via: Mapped[AddedVia] = mapped_column(
@@ -38,5 +41,5 @@ class CartItem(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    user: Mapped["User"] = relationship(back_populates="cart_items")
+    user: Mapped["Profile"] = relationship(back_populates="cart_items")
     product: Mapped["Product"] = relationship()

@@ -42,17 +42,11 @@ export interface ProductListParams {
 // ── Auth ──────────────────────────────────────────────────────────────────
 
 export interface User {
-  id: number
+  id: string
   email: string
   name: string
   phone: string | null
-  is_active: boolean
   created_at: string
-}
-
-export interface Token {
-  access_token: string
-  token_type: string
 }
 
 // ── Cart ──────────────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ Every test runs against a fresh in-memory SQLite database, isolated from
 the real seeded dev/prod database (core/database.py's own engine is never
 touched here) — the FastAPI get_db dependency is overridden per test.
 """
+import json
+import uuid
 from collections.abc import AsyncIterator
 
 import pytest
@@ -12,25 +14,45 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from jose.exceptions import JWTError
+
+import core.security
 import models  # noqa: F401 — registers every model class with Base.metadata
-import schemas.user
 from core.database import Base, get_db
 from main import app
 from models.product import Product
 
 
 @pytest.fixture(autouse=True)
-def _skip_email_deliverability_check(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Signup's email deliverability check (schemas/user.py) does a live
-    DNS lookup — a real, deliberate feature, but not something the test
-    suite should depend on (network-dependent, non-hermetic, and
-    "@example.com" — IANA's reserved documentation domain, used
-    throughout these tests — deliberately declares via a null MX record
-    that it accepts no mail at all, so it would fail this check for a
-    reason that has nothing to do with what's under test). Mirrors
-    core/test_llm.py's approach of mocking the provider boundary instead
-    of hitting a real external dependency in tests."""
-    monkeypatch.setattr(schemas.user, "validate_email", lambda email, **kwargs: None)
+def _mock_supabase_token_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Real tokens are ES256 JWTs verified against Supabase's live JWKS
+    (core/security.py) — tests never hit that real external service.
+    Instead, a test "token" (see make_test_token below) is just the JSON
+    payload get_current_user actually reads (sub/email/user_metadata),
+    and this fixture replaces real verification with a plain parse of
+    that string. Mirrors the established pattern of mocking external-
+    service boundaries in tests (core/test_llm.py for the LLM provider)."""
+
+    async def fake_verify(token: str) -> dict:
+        try:
+            return json.loads(token)
+        except json.JSONDecodeError as e:
+            # get_current_user only knows how to handle JWTError from a
+            # failed verification — a garbage test token needs to fail the
+            # same way a garbage real token would (real jose.jwt.decode
+            # raises JWTError, not JSONDecodeError, on malformed input).
+            raise JWTError("invalid test token") from e
+
+    monkeypatch.setattr(core.security, "verify_supabase_token", fake_verify)
+
+
+def make_test_token(email: str = "test@example.com", name: str = "Test User") -> str:
+    """A fake bearer token for a fresh synthetic user. Real signup/login
+    happen against Supabase directly now, not this backend, so there's no
+    endpoint here to call — the first authenticated request carrying this
+    token lazily creates the corresponding profile row (see
+    core/security.get_current_user)."""
+    return json.dumps({"sub": str(uuid.uuid4()), "email": email, "user_metadata": {"name": name}})
 
 
 @pytest_asyncio.fixture
@@ -82,10 +104,6 @@ async def seeded_products(db_session: AsyncSession) -> list[Product]:
 
 
 async def signup_user(client: AsyncClient, email: str = "test@example.com") -> str:
-    """Convenience helper: signs up a fresh user, returns their access token."""
-    r = await client.post(
-        "/auth/signup",
-        json={"email": email, "password": "Password123!", "name": "Test User"},
-    )
-    assert r.status_code == 200, r.text
-    return r.json()["access_token"]
+    """Convenience helper: returns a bearer token for a fresh synthetic
+    test user (see make_test_token)."""
+    return make_test_token(email=email)

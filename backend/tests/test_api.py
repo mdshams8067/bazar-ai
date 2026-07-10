@@ -1,41 +1,39 @@
 """
 tests/test_api.py — Integration tests for the core commerce CRUD backend.
 
-Covers: signup -> login -> /auth/me; product list pagination/category/search;
-cart add -> update -> over-stock rejection -> checkout -> cart cleared;
-and the order-ownership isolation guarantee.
+Covers: /auth/me (lazy profile creation from a verified token);
+product list pagination/category/search; cart add -> update -> over-stock
+rejection -> checkout -> cart cleared; and the order-ownership isolation
+guarantee.
+
+Signup/login themselves aren't tested here — they happen against Supabase
+directly now, not this backend (see tests/conftest.py).
 """
 from httpx import AsyncClient
 
 from models.product import Product
-from tests.conftest import signup_user
+from tests.conftest import make_test_token, signup_user
 
 
-async def test_signup_login_me_round_trip(client: AsyncClient) -> None:
-    signup_resp = await client.post(
-        "/auth/signup",
-        json={"email": "shopper@example.com", "password": "Password123!", "name": "Shopper"},
-    )
-    assert signup_resp.status_code == 200
-    assert signup_resp.json()["token_type"] == "bearer"
+async def test_me_lazily_creates_and_returns_profile(client: AsyncClient) -> None:
+    token = make_test_token(email="shopper@example.com", name="Shopper")
+    headers = {"Authorization": f"Bearer {token}"}
 
-    login_resp = await client.post(
-        "/auth/login",
-        data={"username": "shopper@example.com", "password": "Password123!"},
-    )
-    assert login_resp.status_code == 200
-    token = login_resp.json()["access_token"]
-
-    me_resp = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    me_resp = await client.get("/auth/me", headers=headers)
     assert me_resp.status_code == 200
-    assert me_resp.json()["email"] == "shopper@example.com"
+    body = me_resp.json()
+    assert body["email"] == "shopper@example.com"
+    assert body["name"] == "Shopper"
+
+    # Second request with the same token resolves to the same profile
+    # (not a fresh row each time) — same id both times.
+    me_resp_again = await client.get("/auth/me", headers=headers)
+    assert me_resp_again.json()["id"] == body["id"]
 
 
-async def test_login_rejects_wrong_password(client: AsyncClient) -> None:
-    await signup_user(client, email="wrongpass@example.com")
-    resp = await client.post(
-        "/auth/login", data={"username": "wrongpass@example.com", "password": "not-the-password"}
-    )
+async def test_me_rejects_missing_or_garbage_token(client: AsyncClient) -> None:
+    assert (await client.get("/auth/me")).status_code == 401
+    resp = await client.get("/auth/me", headers={"Authorization": "Bearer not-valid-json"})
     assert resp.status_code == 401
 
 

@@ -34,9 +34,16 @@ class Settings(BaseSettings):
         return v
 
     # ── Auth / CORS ───────────────────────────────────────────────────────
+    # SECRET_KEY/ACCESS_TOKEN_EXPIRE_MINUTES are vestigial — this backend no
+    # longer issues its own tokens (Supabase does), kept only so an existing
+    # .env with these set doesn't error on the unrelated `extra="ignore"`
+    # config above being any stricter than it needs to be.
     SECRET_KEY: str = "dev-only-insecure-secret-override-in-.env"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days — a demo, not a bank
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
     ENV: str = "local"
+    # Supabase project URL — used to fetch their public JWKS for verifying
+    # tokens the frontend obtains directly from Supabase's own Auth API.
+    SUPABASE_URL: str = ""
     # NoDecode: skip pydantic-settings' default JSON-decode attempt for env
     # values so a plain comma-separated string (the easy thing to type in
     # .env) reaches the validator below untouched.
@@ -88,6 +95,7 @@ DATABASE_URL = settings.DATABASE_URL
 SECRET_KEY = settings.SECRET_KEY
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 ENV = settings.ENV
+SUPABASE_URL = settings.SUPABASE_URL
 CORS_ORIGINS = settings.CORS_ORIGINS
 LLM_PROVIDER = settings.LLM_PROVIDER
 LLM_FALLBACK_PROVIDER = settings.LLM_FALLBACK_PROVIDER

@@ -21,7 +21,7 @@ The differentiator: a function-calling agent, not a Q&A chatbot. Tell it what yo
 
 FastAPI, fully async (SQLAlchemy 2.0 `AsyncSession` end to end), Postgres in production / SQLite locally via one `DATABASE_URL` swap, Alembic migrations.
 
-- **Auth** — JWT bearer tokens, bcrypt password hashing (thread-pooled so it never blocks the async event loop). Signup enforces password complexity (upper/lower/digit/symbol) and checks the email domain can actually receive mail (DNS/MX lookup, not just format), both mirrored live in the signup form.
+- **Auth** — Supabase Auth, not a hand-rolled system. The frontend signs up/logs in directly against Supabase's own API (`@supabase/supabase-js`); this backend never sees a password and issues no tokens of its own — it only verifies the token Supabase already issued, against their public JWKS (ES256, asymmetric — no shared secret to protect). A `profiles` table holds the one thing Supabase's own schema has no place for (name/phone), keyed to the same id Supabase assigns, and is created lazily on a user's first authenticated request.
 - **Products** — paginated listing, category filter, search.
 - **Cart** — add/update/remove, always re-validated against live stock.
 - **Orders** — checkout snapshots price and product name onto each order line (so order history stays readable even if a product's price or listing changes later), decrements stock, and clears the cart in one transaction.
@@ -33,12 +33,14 @@ React + Vite + Tailwind, installable as a PWA. Product browsing, cart, checkout,
 
 ## Getting started
 
+Create a free Supabase project first (supabase.com) — it provides both the Postgres database and auth. From its dashboard, grab: the database connection string (use the **session pooler** URI, not the direct/IPv6-only one), the project URL, and the anon/public API key.
+
 **Backend**
 ```bash
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in GOOGLE_API_KEY at minimum
+cp .env.example .env   # fill in DATABASE_URL, SUPABASE_URL, GOOGLE_API_KEY at minimum
 alembic upgrade head
 python -m seed.seed_db
 uvicorn main:app --reload
@@ -48,6 +50,7 @@ uvicorn main:app --reload
 ```bash
 cd frontend
 npm install
+cp .env.example .env.local   # fill in VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 npm run dev
 ```
 
@@ -56,3 +59,7 @@ npm run dev
 - Backend: `pytest` (unit/integration, mocked LLM calls — fast, runs on every change).
 - `python -m agent.test_agent` — single-turn acceptance test against the real LLM.
 - `python -m agent.test_conversations [--repeat N]` — multi-turn conversational eval suite against the real LLM, the real router, and a real cart: add→remove, add→clear, cook a dish→keep only one ingredient, cook a dish→swap an ingredient (two phrasings), and an off-topic fallback check. `--repeat` cycles through several phrasings of the same request per pass, since a single phrasing working once is weaker evidence than the same intent surviving several people's wording of it.
+
+## Known limitations
+
+- **Signup email confirmation runs on Supabase's default shared email sender, not a custom SMTP provider.** That sender is capped at just 2 emails/hour by default — fine for this project's expected signup volume, but a real production launch should configure a custom SMTP provider (Resend, Postmark, etc.) in Supabase's Auth settings instead, both to lift that limit and to get proper bounce/complaint tracking under your own sending reputation rather than Supabase's shared one.

@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 import enum
+import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
 
 if TYPE_CHECKING:
     from models.order_item import OrderItem
-    from models.user import User
+    from models.profile import Profile
 
 
 class OrderStatus(str, enum.Enum):
@@ -25,7 +26,9 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("profiles.id"), nullable=False, index=True
+    )
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, native_enum=False), nullable=False, default=OrderStatus.pending
     )
@@ -47,5 +50,5 @@ class Order(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    user: Mapped["User"] = relationship(back_populates="orders")
+    user: Mapped["Profile"] = relationship(back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")

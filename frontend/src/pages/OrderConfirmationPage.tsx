@@ -17,12 +17,28 @@ export function OrderConfirmationPage() {
   const [params] = useSearchParams()
   const paymentStatus = params.get('payment') as PaymentQueryStatus
   const [order, setOrder] = useState<Order | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (id) getOrder(Number(id)).then(setOrder).catch(() => setOrder(null))
+    if (id) {
+      getOrder(Number(id))
+        .then(setOrder)
+        .catch((err) => setLoadError(err instanceof ApiError ? err.detail : 'Could not load your order'))
+    }
   }, [id])
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16 text-center">
+        <p className="text-ink-muted">{loadError}</p>
+        <Link to="/orders" className="mt-4 inline-block">
+          <Button variant="secondary">View order history</Button>
+        </Link>
+      </div>
+    )
+  }
 
   if (!order) {
     return <div className="mx-auto max-w-lg px-4 py-16 text-center text-ink-muted">Loading your order…</div>

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db
 from core.security import get_current_user
 from models.product import Product
-from models.user import User
+from models.profile import Profile
 from schemas.product import CategoryCount, ProductCreate, ProductListRead, ProductRead, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -78,7 +78,7 @@ async def get_product(product_id: int, db: AsyncSession = Depends(get_db)) -> Pr
 async def create_product(
     payload: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: Profile = Depends(get_current_user),
 ) -> Product:
     """Admin-style create, included for CRUD completeness. Gated behind
     "any authenticated user" only — a real role/admin system is out of
@@ -103,7 +103,7 @@ async def update_product(
     product_id: int,
     payload: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: Profile = Depends(get_current_user),
 ) -> Product:
     product = await db.get(Product, product_id)
     if product is None:
@@ -121,7 +121,7 @@ async def update_product(
 async def delete_product(
     product_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    _current_user: Profile = Depends(get_current_user),
 ) -> None:
     product = await db.get(Product, product_id)
     if product is None:

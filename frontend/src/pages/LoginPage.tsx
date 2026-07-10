@@ -21,7 +21,12 @@ export function LoginPage() {
       await login(email, password)
       navigate(params.get('redirect') || '/')
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : 'Could not sign in')
+      // Supabase's SDK throws plain Errors with its own meaningful message
+      // ("Invalid login credentials", etc.) — ApiError only ever comes
+      // from our own backend, which no longer handles login at all.
+      if (err instanceof ApiError) setError(err.detail)
+      else if (err instanceof Error) setError(err.message)
+      else setError('Could not sign in')
     } finally {
       setSubmitting(false)
     }

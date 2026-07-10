@@ -1,4 +1,4 @@
-import { getToken } from '../lib/tokenStorage'
+import { supabase } from '../lib/supabaseClient'
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
@@ -43,9 +43,15 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     body = JSON.stringify(options.body)
   }
 
-  const token = getToken()
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
+  // Supabase's client manages its own session (refreshing an expiring
+  // token automatically) — always pull the current access token fresh
+  // rather than caching it ourselves, so a refreshed token is picked up
+  // on the very next request without any extra plumbing.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`
   }
 
   const res = await fetch(`${API_BASE_URL}${path}`, {

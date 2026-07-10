@@ -1,26 +1,10 @@
 import { apiRequest } from './client'
-import type { Token, User } from '../types/api'
+import type { User } from '../types/api'
 
-export interface SignupPayload {
-  email: string
-  password: string
-  name: string
-  phone?: string
-}
-
-export function signup(payload: SignupPayload): Promise<Token> {
-  return apiRequest<Token>('/auth/signup', { method: 'POST', body: payload })
-}
-
-export function login(email: string, password: string): Promise<Token> {
-  // POST /auth/login is form-encoded (OAuth2PasswordRequestForm), not
-  // JSON — `username` is the field name FastAPI expects, holding the email.
-  return apiRequest<Token>('/auth/login', {
-    method: 'POST',
-    form: { username: email, password },
-  })
-}
-
+// No signup/login here — those go straight through Supabase's own client
+// (see store/authStore.ts), not this backend. This is the one auth-related
+// call that still hits our own API: resolving the verified token to this
+// user's app-specific profile (name/phone — Supabase owns email/password).
 export function getMe(): Promise<User> {
   return apiRequest<User>('/auth/me')
 }
