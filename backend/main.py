@@ -57,9 +57,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 @app.get("/health")
+@app.head("/health")
 async def health() -> dict[str, str]:
     """Cheap endpoint, no DB call — the frontend pings this to detect the
-    free-tier cold-start wake-up (~50s after inactivity)."""
+    free-tier cold-start wake-up (~50s after inactivity). Also accepts
+    HEAD: uptime monitors (e.g. UptimeRobot) default to HEAD requests to
+    save bandwidth, and FastAPI doesn't auto-add HEAD support for a
+    GET-only route — without this, every check comes back a false-
+    positive 405 "down" alert even though the backend is fine."""
     return {"status": "ok"}
 
 
