@@ -58,6 +58,33 @@ class SubstituteComponent:
 
 
 @dataclass
+class PantryItem:
+    """One item the customer says they already have at home, in response
+    to Bazar Buddy's "do you already have any of these at home?" question
+    (see agent/pipeline.py's pantry-check gate) — ParsedRequest.
+    pantry_items_owned is a *list* of these, since one answer commonly
+    names several things at once ("I have rice and some oil"). quantity/
+    quantity_unit stay null when the customer names the item without
+    stating how much ("I have rice") — treated as "enough to skip it
+    entirely" rather than guessed at, since assuming a specific amount
+    they never stated would be a silent guess about a fact this system
+    doesn't have."""
+
+    name_en: str
+    quantity: float | None = None
+    quantity_unit: str | None = None
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> PantryItem:
+        qty = raw.get("quantity")
+        return cls(
+            name_en=str(raw.get("name_en") or "item"),
+            quantity=float(qty) if isinstance(qty, (int, float)) else None,
+            quantity_unit=str(raw.get("quantity_unit")) if raw.get("quantity_unit") else None,
+        )
+
+
+@dataclass
 class ParsedIngredient:
     """One ingredient entry from the LLM's structured output."""
 
@@ -97,6 +124,19 @@ class ParsedIngredient:
         back to sane defaults rather than raising, since the LLM's output
         shape can drift."""
         diy_raw = raw.get("diy_substitute") or None
+        # The schema asks for a list, but a live, reproducible slip found
+        # the model occasionally emit a single bare object instead of a
+        # one-item list (a plain string in that position, seen once, is
+        # the same class of drift) — wrap either case back into a list
+        # rather than crashing iterating over a dict's keys or a string's
+        # characters, consistent with this method's whole "sane default,
+        # not an exception" contract.
+        if isinstance(diy_raw, dict):
+            diy_raw = [diy_raw]
+        elif isinstance(diy_raw, list):
+            diy_raw = [c for c in diy_raw if isinstance(c, dict)]
+        else:
+            diy_raw = None
         return cls(
             name_en=str(raw.get("name_en") or "item"),
             search_terms=[str(t) for t in (raw.get("search_terms") or [])] or [str(raw.get("name_en") or "item")],

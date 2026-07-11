@@ -13,13 +13,15 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent.matcher import (
     Match,
+    PantryItem,
     ParsedIngredient,
     best_size_fit,
     find_pack_size_options,
@@ -74,6 +76,22 @@ def _build_prompt(user_message: str, history: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
+def _as_dict_list(value: object) -> list[dict]:
+    """Normalizes a schema field that's supposed to be a list of objects,
+    since the LLM's output shape can drift — live and reproducible, not
+    hypothetical: a "diy_substitute" field that should have been a
+    one-item list came back as a single bare object instead, and
+    iterating a dict directly yields its string keys, not the object
+    itself, crashing the next .from_dict() call on a plain string. A
+    lone dict is wrapped into a one-item list; anything else that isn't
+    already a list of dicts is dropped rather than trusted."""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
 @dataclass
 class ParsedRequest:
     """The LLM's structured interpretation of one chat message."""
@@ -96,6 +114,13 @@ class ParsedRequest:
     # ingredient(s) being swapped in, matched against the catalog like a
     # normal add.
     remove_ingredients: list[ParsedIngredient] = field(default_factory=list)
+    # cook_dish/budget_dish only: items the customer says they already
+    # have at home, extracted from a message answering the pantry-check
+    # question (see run_agent's pantry gate). Empty for every other
+    # intent, and empty whenever the current message isn't answering
+    # that question at all — empty always means "proceed with the full
+    # ingredient list as-is," never "assume nothing is owned" as a guess.
+    pantry_items_owned: list[PantryItem] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, raw: dict) -> ParsedRequest:
@@ -105,10 +130,11 @@ class ParsedRequest:
             servings=raw.get("servings"),
             serving_unit=str(raw.get("serving_unit") or "people"),
             budget_bdt=raw.get("budget_bdt"),
-            ingredients=[ParsedIngredient.from_dict(i) for i in (raw.get("ingredients") or [])],
+            ingredients=[ParsedIngredient.from_dict(i) for i in _as_dict_list(raw.get("ingredients"))],
             reply_context=str(raw.get("reply_context") or ""),
             followup_question=raw.get("followup_question") or None,
-            remove_ingredients=[ParsedIngredient.from_dict(i) for i in (raw.get("remove_ingredients") or [])],
+            remove_ingredients=[ParsedIngredient.from_dict(i) for i in _as_dict_list(raw.get("remove_ingredients"))],
+            pantry_items_owned=[PantryItem.from_dict(i) for i in _as_dict_list(raw.get("pantry_items_owned"))],
         )
 
 
@@ -457,6 +483,119 @@ async def _load_catalog(db: AsyncSession) -> list[Product]:
     return catalog
 
 
+# Deliberately fixed, code-controlled text — never the LLM's own phrasing
+# of this question (which the prompt still asks for in followup_question,
+# but run_agent overrides before returning; see the pantry gate below).
+# Needing this exact string to show up verbatim in conversation history
+# is what lets the *next* turn cheaply and reliably detect "the previous
+# assistant turn was this specific question" without adding any server-
+# side session state — the whole app is already stateless between
+# messages, reconstructing everything from history text each time (the
+# same pattern modify_dish already relies on to recall what ingredient
+# is being swapped out).
+_PANTRY_QUESTION = "Do you already have any of these at home?"
+
+
+def _awaiting_pantry_response(history: list[dict] | None) -> bool:
+    """True when the immediately-preceding assistant turn asked the
+    pantry-check question — i.e. this message is very likely answering
+    it, not starting something new."""
+    if not history:
+        return False
+    last = history[-1]
+    return last.get("role") == "assistant" and _PANTRY_QUESTION in (last.get("text") or "")
+
+
+# Matches this module's own breakdown format ("0.5kg aromatic rice",
+# "1 pc biryani masala" — see _format_pack: no space before kg/gm/ltr/ml,
+# one space before pc/pcs). Deliberately permissive on the name (anything
+# up to the next comma/period) since dish ingredient names are free text.
+_INGREDIENT_BREAKDOWN_RE = re.compile(r"([\d.]+)\s*(kg|gm|ltr|ml|pcs?)\s+([^,.]+)")
+
+
+def _parse_ingredient_breakdown(text: str) -> dict[str, tuple[float, str]]:
+    """Extracts {ingredient name (lowercase): (quantity, unit)} from a
+    breakdown line this module itself generated (the pantry-gate reply,
+    see run_agent). Used instead of trusting the LLM to recall the exact
+    numbers it stated a turn earlier: live testing found it doesn't
+    always do that consistently even when explicitly instructed to (a
+    dish's onion need recomputed as 0.2kg on a follow-up turn when the
+    original turn had already stated 0.3kg) — recalling a precise number
+    from free text is exactly the kind of "fact," not "intent," this
+    project's whole design keeps out of the LLM's hands elsewhere.
+    Parsing our own deterministic output back out is just applying that
+    same principle here."""
+    return {
+        name.strip().lower(): (float(qty), "pcs" if unit.startswith("pc") else unit)
+        for qty, unit, name in _INGREDIENT_BREAKDOWN_RE.findall(text)
+    }
+
+
+def _find_pantry_match(ingredient: ParsedIngredient, owned: list[PantryItem]) -> PantryItem | None:
+    """Matches a pantry item the customer named against one of the dish's
+    real ingredients — plain substring first, fuzzy as a fallback (same
+    token_sort_ratio approach as agent/matcher.py's fuzzy_match, reused
+    here for the same reason: "rice" said in a pantry answer should match
+    "aromatic rice" in the ingredient list without needing an exact
+    string)."""
+    ing_name = ingredient.name_en.lower()
+    for item in owned:
+        item_name = item.name_en.lower()
+        if item_name in ing_name or ing_name in item_name:
+            return item
+    for item in owned:
+        if fuzz.token_sort_ratio(ing_name, item.name_en.lower()) >= 70:
+            return item
+    return None
+
+
+def _apply_pantry_adjustments(
+    ingredients: list[ParsedIngredient], owned: list[PantryItem]
+) -> list[ParsedIngredient]:
+    """Reduces or drops ingredients the customer already has at home.
+
+    - Named with no quantity ("I have rice") -> assumed enough, dropped
+      entirely rather than guessing how much they actually have.
+    - Named with a quantity that covers or exceeds the need -> also
+      dropped entirely.
+    - Named with a quantity smaller than the need, same unit dimension
+      (e.g. "1kg" against a "kg" need) -> kept, but only for the deficit
+      (need 2kg, have 1kg -> buy 1kg), so the customer isn't sold what
+      they already own.
+    - A unit-dimension mismatch (e.g. they said "2 pcs" against a "kg"
+      need) can't be safely compared -> left at the full original need
+      rather than guessed at.
+    - Ingredients the customer didn't mention at all pass through
+      unchanged."""
+    if not owned:
+        return ingredients
+
+    adjusted: list[ParsedIngredient] = []
+    for ing in ingredients:
+        match = _find_pantry_match(ing, owned)
+        if match is None:
+            adjusted.append(ing)
+            continue
+        if match.quantity is None or match.quantity_unit is None:
+            continue  # named with no amount -> assume they have enough
+
+        need_dim, need_base = to_base(ing.quantity_unit, ing.quantity)
+        have_dim, have_base = to_base(match.quantity_unit, match.quantity)
+        if have_dim != need_dim:
+            adjusted.append(ing)
+            continue
+
+        deficit_base = need_base - have_base
+        if deficit_base <= 0:
+            continue  # they already have enough
+
+        _, per_unit_base = to_base(ing.quantity_unit, 1.0)
+        deficit_in_ing_unit = deficit_base / per_unit_base
+        adjusted.append(replace(ing, quantity=deficit_in_ing_unit, quantity_stated=True))
+
+    return adjusted
+
+
 async def run_agent(
     user_message: str, db: AsyncSession, history: list[dict] | None = None
 ) -> AgentResult:
@@ -532,6 +671,70 @@ async def run_agent(
             unmatched=[],
             parsed=parsed,
         )
+
+    # Once servings is known, a fresh cook_dish/budget_dish request still
+    # needs one more answer before shopping: does the customer already
+    # have any of these at home? (agent/prompts.py's own rule already has
+    # the LLM ask this whenever nothing else is pending — this gate is
+    # what makes the app actually wait for the answer instead of asking
+    # while shopping anyway, the exact same problem the servings gate
+    # above fixes for the previous question.) _awaiting_pantry_response
+    # tells the two cases apart: True means the previous assistant turn
+    # already asked this exact question, so this message is very likely
+    # answering it — reconcile parsed.pantry_items_owned (empty just
+    # means "proceed with the full list, nothing owned") into the
+    # ingredient quantities and continue straight into matching. False
+    # means this is the first time reaching this dish with servings
+    # known — ask, and stop here without touching the catalog or cart.
+    # Narrowly corrected before the check below, not broadly: live
+    # testing found a plain "no, add everything" answering the pantry
+    # question sometimes comes back classified as add_items instead of
+    # staying cook_dish/budget_dish — which has different downstream
+    # behavior (ask_pack_size=True triggers pack-size clarification
+    # questions that don't belong in a recipe flow). Only correcting this
+    # specific, observed drift (add_items, with a real ingredient list
+    # already computed) rather than forcing every intent back to
+    # cook_dish whenever the previous turn happened to ask about pantry
+    # items — a customer genuinely changing the subject after that
+    # question (e.g. asking a price) must NOT be dragged back into the
+    # recipe flow just because of what the last turn asked.
+    if _awaiting_pantry_response(history) and parsed.intent == "add_items" and parsed.ingredients:
+        parsed.intent = "cook_dish"
+    if parsed.intent in ("cook_dish", "budget_dish"):
+        if _awaiting_pantry_response(history):
+            # Use the quantities actually shown to the customer (parsed
+            # back out of our own previous reply), not whatever this
+            # turn's LLM call recomputed for the same dish — see
+            # _parse_ingredient_breakdown's docstring for the live
+            # inconsistency that motivated this.
+            original = _parse_ingredient_breakdown(history[-1].get("text") or "")
+            restored = []
+            for ing in parsed.ingredients:
+                found = original.get(ing.name_en.lower())
+                if found is None:
+                    for name, qty_unit in original.items():
+                        if name in ing.name_en.lower() or ing.name_en.lower() in name:
+                            found = qty_unit
+                            break
+                restored.append(replace(ing, quantity=found[0], quantity_unit=found[1]) if found else ing)
+            parsed.ingredients = _apply_pantry_adjustments(restored, parsed.pantry_items_owned)
+            parsed.followup_question = None
+        else:
+            breakdown = ", ".join(
+                f"{_format_pack(ing.quantity_unit, ing.quantity)} {ing.name_en}" for ing in parsed.ingredients
+            )
+            dish = parsed.dish_name or "this"
+            servings_desc = f" ({parsed.servings} {parsed.serving_unit})" if parsed.servings else ""
+            parsed.followup_question = _PANTRY_QUESTION
+            return AgentResult(
+                reply=f"For {dish}{servings_desc}, you'll need: {breakdown}.",
+                intent=parsed.intent,
+                matches=[],
+                cart_actions=[],
+                totals={"subtotal_bdt": 0.0, "item_count": 0},
+                unmatched=[],
+                parsed=parsed,
+            )
 
     catalog = await _load_catalog(db)
 

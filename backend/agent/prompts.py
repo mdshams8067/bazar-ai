@@ -145,6 +145,21 @@ OUTPUT SCHEMA:
     ingredient(s) being swapped OUT of the customer's cart. Empty list for
     every other intent.>
   ],
+  "pantry_items_owned": [
+    <cook_dish/budget_dish ONLY, and ONLY when the customer's message is
+    answering a "do you already have any of these at home?" question —
+    naming specific item(s) they already have, e.g. "I have rice and some
+    oil", "I already have 1kg rice", "just the onion and garlic". Each
+    entry: {"name_en": <string, the item as they named it>, "quantity":
+    <number or null — only if they stated a specific amount they have>,
+    "quantity_unit": <"kg"|"gm"|"ltr"|"ml"|"pcs" or null — required
+    whenever quantity is given, otherwise null>}. Leave this list EMPTY
+    for everything else — a plain "no", "I'm not sure", "don't have
+    anything", or any message that isn't answering that specific
+    question. Empty is not a guess that they own nothing; it's the
+    signal to proceed with the full ingredient list exactly as
+    computed, unchanged.>
+  ],
   "reply_context": <string: one short sentence describing what you
                     understood, for the UI to show — e.g. "Ingredients
                     for morog polao, 6 servings." Just the understanding
@@ -182,6 +197,16 @@ RULES:
   ~500gm chinigura/aromatic rice, ~1kg chicken, ~150ml oil or ghee, 2-3
   onions ≈ 300gm, ~30gm ginger paste, ~30gm garlic paste, cardamom/
   cinnamon/cloves small amounts, salt).
+- If the conversation history already stated exact quantities for this
+  same dish and serving size (you'll see them spelled out, e.g. "you'll
+  need: 0.5kg aromatic rice, 1kg chicken, 0.3kg onion..."), reuse those
+  exact numbers for "ingredients" rather than recomputing fresh ones —
+  the customer read and is responding to the numbers already shown them
+  (e.g. answering how much of each they already have at home), so a
+  freshly recalculated amount that quietly differs from what they saw
+  would silently change the deal they thought they were responding to.
+  Only compute new quantities from scratch when this is genuinely a new
+  dish/serving-size request with no matching numbers already in history.
 - Include any traditional garnish or finishing ingredient that is
   genuinely part of the standard recipe for the requested dish (whatever
   cuisine it's from — e.g. fried onion or dried fruit for a Bangladeshi
@@ -295,11 +320,16 @@ RULES:
   clarifying questions in JSON. (e.g., "polao" alone → plain polao
   without meat.)
 - NEVER invent an ingredient list longer than 12 items. Core recipe only.
-- For cook_dish/budget_dish, always ask in `followup_question` whether the
-  customer already has any of the ingredients at home, to avoid adding
-  items they already have (unless you already asked something else there,
-  like servings — pick the single most useful question, never stack two
-  into one run-on sentence).
+- For cook_dish/budget_dish, whether and when to ask about servings or
+  pantry items is handled by the surrounding system, not by you — it
+  overrides `followup_question` for these two intents regardless of what
+  you put there. Your job is narrower: figure out `servings` from what
+  the customer said (or leave it null if genuinely unstated), compute
+  `ingredients` normally either way, and — separately — recognize when
+  the customer's message is answering "do you already have any of these
+  at home?" (see `pantry_items_owned` above) versus starting a fresh
+  request. A real prior turn asking that exact question will appear in
+  the conversation history shown to you when it's relevant.
 - `followup_question` is null for remove_items, clear_cart, and
   product_question — there's nothing to ask, the action already speaks
   for itself.
