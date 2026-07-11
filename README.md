@@ -1,8 +1,27 @@
 # Bazar AI
 
-An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products. Inspired by Shwapno, built independently as a take-home project.
+An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products.
 
 **Live demo:** [bazar-ai.vercel.app](https://bazar-ai.vercel.app) — note: the backend runs on Render's free tier, so the first request after a period of inactivity can take up to ~50s to wake up (the app shows a banner while this happens).
+
+<table>
+<tr>
+<td width="65%" valign="top">
+
+**Bazar Buddy handling a real dish request end to end** — asking what you already have at home, then filling the cart with a brand swap and an honest skip for the one thing not in stock.
+
+<img src="docs/media/web_demo.gif" alt="Bazar Buddy handling a biriyani request on the web app, including the pantry-check follow-up and the resulting cart with a brand swap and a skipped item" width="100%">
+
+</td>
+<td width="35%" valign="top">
+
+**The same backend and catalog, native on Android** via the Flutter app.
+
+<img src="docs/media/mobile_home.png" alt="The Flutter mobile app home screen, signed in, with items in the cart from a Bazar Buddy conversation" width="100%">
+
+</td>
+</tr>
+</table>
 
 ## Data pipeline
 
@@ -109,3 +128,4 @@ npm run dev
 - **Jina AI's embedding and reranking models are CC-BY-NC 4.0-licensed — non-commercial use only.** Acceptable for this take-home submission; a commercial deployment would need a different provider or a paid Jina license.
 - **`category_hint` is an LLM guess, not a database lookup, so it can still be wrong for a catalog quirk not yet found and hard-coded into the prompt** — the retry-against-full-catalog fallback (see "Bazar Buddy" above) catches most of these, but isn't a guarantee for every possible mismatch.
 - **The Flutter mobile app doesn't build for iOS in this submission** — Xcode is required and only runs on macOS; this was built on Linux. The codebase itself is platform-agnostic and needs no changes to build for iOS given a Mac.
+- **Tapping a signup confirmation email on mobile opens the confirmation in a browser, not the app.** The mobile app doesn't yet register a custom URL scheme deep link, so it falls back to the same web redirect the frontend uses — the account still gets confirmed correctly, the customer just lands on the website instead of being routed back into the app. `supabase_flutter` supports this out of the box (an `AndroidManifest.xml` intent filter plus `emailRedirectTo` on the mobile signup call), left as a follow-up rather than done in this submission.
