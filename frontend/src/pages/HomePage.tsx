@@ -10,7 +10,7 @@ import type { Product } from '../types/api'
 const HOW_IT_WORKS = [
   { icon: '💬', title: 'Tell Bazar Buddy', body: 'Say what you\'re cooking — English, Bangla, or Banglish.' },
   { icon: '🧾', title: 'It checks real stock', body: 'Every ingredient is matched against our live catalog, not guessed.' },
-  { icon: '🔁', title: 'Honest substitutions', body: 'Out of stock? You get a brand swap, a substitute, or an honest skip.' },
+  { icon: '🔁', title: 'Honest substitutions', body: 'Out of stock? You get a real substitute, or an honest skip — never a silent guess.' },
   { icon: '🛒', title: 'Cart, filled', body: "Everything in stock lands straight in your cart, ready to check out." },
 ]
 
