@@ -8,6 +8,7 @@ __pycache__/
 backend/bazar.db
 backend/llm_cache.db
 *.db
+backend/db_backup/
 
 # Secrets
 backend/.env

@@ -493,7 +493,9 @@ async def _load_catalog(db: AsyncSession) -> list[Product]:
 # messages, reconstructing everything from history text each time (the
 # same pattern modify_dish already relies on to recall what ingredient
 # is being swapped out).
-_PANTRY_QUESTION = "Do you already have any of these at home?"
+_PANTRY_QUESTION = (
+    "Do you already have any of these at home? Let me know and I'll add the rest to your cart automatically."
+)
 
 
 def _awaiting_pantry_response(history: list[dict] | None) -> bool:
