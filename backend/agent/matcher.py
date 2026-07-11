@@ -140,6 +140,15 @@ class Match:
     # for a single unavailable ingredient (product is None in that case;
     # line_total is the sum of these). See agent/stock.py's Tier 4.
     components: list[MatchComponent] | None = None
+    # True when best_size_fit() couldn't hit the requested quantity
+    # exactly (e.g. asked for 500ml, no combination of real pack sizes
+    # totals exactly that) and had to round up to the closest available
+    # total instead. Deliberately not turned into a per-ingredient note
+    # (that would be noisy across a whole recipe) — pipeline.py's
+    # _assemble_reply() collects this across all matches into one
+    # generic summary line at the end of the reply instead, the same
+    # pattern already used for essential_failures.
+    size_approximated: bool = False
 
 
 def _safe_float(value: object, default: float) -> float:
@@ -280,15 +289,29 @@ def fuzzy_match(pool: list[Product], search_terms: list[str]) -> list[Product]:
     return [p for _, p in scored]
 
 
-def best_size_fit(in_stock: list[Product], ingredient: ParsedIngredient) -> tuple[Product, float]:
-    """Picks the pack size that best fits the needed quantity, and how many
-    of that pack to buy.
+def best_size_fit(in_stock: list[Product], ingredient: ParsedIngredient) -> tuple[Product, float, bool]:
+    """Picks the pack size (and how many of it to buy) that lands closest
+    to the needed quantity, comparing the actual total across every
+    candidate rather than just the smallest single pack that individually
+    covers it.
 
-    - Need 500gm, packs 1kg/2kg/10kg -> smallest pack >= need (the 1kg), qty 1.
-    - Need exceeds every pack -> buy multiples of the best (largest) pack.
-    - If no candidate shares the ingredient's unit dimension (e.g. a "pcs"
-      product against a "kg" need), falls back to the first candidate, qty 1.
-    """
+    For each candidate, the minimum whole-unit purchase that covers the
+    need is `ceil(need / pack)`, totalling `qty * pack` — the candidate
+    with the smallest overshoot wins (ties broken by fewest units bought,
+    then by pack size, so results stay deterministic). This matters
+    because "smallest single pack that fits" and "closest total" aren't
+    the same thing: for a 500ml need with 250ml/325ml/1000ml packs
+    available, a single 1000ml technically "fits" in one unit, but
+    2x250ml totals exactly 500ml (zero overshoot) — found live, this
+    used to always pick the single-pack answer even when a multi-pack of
+    a smaller size was a tighter, sometimes exact, match.
+
+    Returns (product, quantity, exact) — `exact` is False whenever the
+    total bought doesn't precisely equal what was asked for, so callers
+    can flag an approximated pack size to the customer instead of
+    silently rounding. If no candidate shares the ingredient's unit
+    dimension (e.g. a "pcs" product against a "kg" need), falls back to
+    the first candidate, qty 1, exact=False."""
     need_dim, need_base = to_base(ingredient.quantity_unit, ingredient.quantity)
 
     sized = []
@@ -298,16 +321,23 @@ def best_size_fit(in_stock: list[Product], ingredient: ParsedIngredient) -> tupl
             sized.append((p, pack_base))
 
     if not sized:
-        return in_stock[0], 1.0
+        return in_stock[0], 1.0, False
 
-    fits = [(p, pack_base) for p, pack_base in sized if pack_base >= need_base]
-    if fits:
-        product, _ = min(fits, key=lambda pair: pair[1])
-        return product, 1.0
+    best_product = None
+    best_pack_base = 0.0
+    best_qty = 0.0
+    best_key = None
+    for p, pack_base in sized:
+        qty = math.ceil(need_base / pack_base)
+        total = qty * pack_base
+        overshoot = total - need_base
+        key = (overshoot, qty, pack_base)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_product, best_pack_base, best_qty = p, pack_base, qty
 
-    product, pack_base = max(sized, key=lambda pair: pair[1])
-    qty = math.ceil(need_base / pack_base)
-    return product, float(qty)
+    exact = abs(best_qty * best_pack_base - need_base) < 1e-6
+    return best_product, float(best_qty), exact
 
 
 def find_pack_size_options(ingredient: ParsedIngredient, catalog: list[Product]) -> list[Product]:
@@ -368,6 +398,7 @@ def _apply_specific_variant_check(ingredient: ParsedIngredient, match: Match) ->
         status="substituted_functional",
         quantity=match.quantity,
         line_total=match.line_total,
+        size_approximated=match.size_approximated,
         note=f"Couldn't find {ingredient.name_en} specifically — added {match.product.name_en} ({generic}) instead (quality and flavor will differ)",
     )
 
@@ -516,20 +547,27 @@ def match_product(
     oos_top = [p for p in top_tier if p.stock_qty == 0]
 
     if in_stock_top and not oos_top:
-        product, qty = best_size_fit(in_stock_top, ingredient)
+        product, qty, exact = best_size_fit(in_stock_top, ingredient)
         return _apply_specific_variant_check(
             ingredient,
-            Match(product=product, status="ok", quantity=qty, line_total=round(product.price_bdt * qty, 2)),
+            Match(
+                product=product,
+                status="ok",
+                quantity=qty,
+                line_total=round(product.price_bdt * qty, 2),
+                size_approximated=not exact,
+            ),
         )
 
     if in_stock_top and oos_top:
-        product, qty = best_size_fit(in_stock_top, ingredient)
+        product, qty, exact = best_size_fit(in_stock_top, ingredient)
         reference = oos_top[0]
         logger.info(f"[matcher] brand substitution: {reference.name_en} -> {product.name_en}")
         return Match(
             product=product,
             status="substituted_brand",
             quantity=qty,
+            size_approximated=not exact,
             line_total=round(product.price_bdt * qty, 2),
             note=f"{reference.name_en} is out of stock — added {product.name_en} instead",
         )

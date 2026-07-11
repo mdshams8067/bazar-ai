@@ -232,9 +232,40 @@ def embedding_candidates(
     query_vector: list[float], query_model: str, query_text: str, pool: list[Product], ingredient_name: str
 ) -> list[Product]:
     """Same shape as matcher.fuzzy_match's return (plain product list) so
-    matcher.py can union the two candidate lists uniformly — in practice
-    at most one product, since rerank_and_select() makes a single
-    confident-or-nothing call rather than returning a ranked list."""
+    matcher.py can union the two candidate lists uniformly.
+
+    rerank_and_select() makes a single confident-or-nothing call — but a
+    single winning product isn't enough for match_product()'s downstream
+    logic to do its job: picking the best-fitting pack size, or noticing
+    an equally-relevant brand is out of stock, both need to compare
+    *several* real candidates, not just the one embedding happened to
+    rank first. So once a winner is confirmed, every other pool product
+    that's a genuine sibling — same core product, different brand/pack
+    size — is gathered via an exact match on embedding_source_text and
+    returned alongside it. This works because enrichment deliberately
+    strips brand/pack noise (seed/enrich_labels.py): verified live that
+    all 9 soyabean-oil products across 5 brands collapse to the
+    identical enriched string ("soyabean oil soybean oil cooking oil
+    tel"), and every real pack size of plain Coca-Cola does too — while
+    genuinely different products (Coca-Cola Zero/Diet/Light) get
+    distinct text and are correctly excluded. Not bounded by cosine's
+    top-15 or the reranker's top-K the way asking the LLM to enumerate
+    candidates itself would be — this catches every sibling in the pool,
+    however many there are.
+
+    Found live: "soybean oil" with only the 1L Rupchanda pack out of
+    stock and a 150ml need used to buy a single 5L bottle (a 33x
+    overshoot) because the embedding tier hands the downstream logic
+    exactly one candidate to work with; grouping siblings here lets it
+    pick a properly-sized pack from the real options instead."""
     shortlist = [p for _, p in cosine_topk(query_vector, query_model, pool)]
     winner = rerank_and_select(query_text, shortlist, ingredient_name)
-    return [winner] if winner else []
+    if winner is None:
+        return []
+
+    winner_text = winner.embedding_source_text
+    if not winner_text:
+        return [winner]
+
+    siblings = [p for p in pool if p.id != winner.id and p.embedding_source_text == winner_text]
+    return [winner] + siblings

@@ -162,12 +162,13 @@ def find_substitute(
         query_text=query_text,
     )
     if brand_candidates:
-        product, qty = best_size_fit(brand_candidates, ingredient)
+        product, qty, exact = best_size_fit(brand_candidates, ingredient)
         logger.info(f"[stock] brand substitution: {oos_name} -> {product.name_en}")
         return Match(
             product=product,
             status="substituted_brand",
             quantity=qty,
+            size_approximated=not exact,
             line_total=round(product.price_bdt * qty, 2),
             note=f"{oos_name} is out of stock — added {product.name_en} instead",
         )
@@ -176,12 +177,13 @@ def find_substitute(
     if ingredient.substitute_hint:
         func_candidates = search_category_in_stock(ingredient.substitute_hint, catalog)
         if func_candidates:
-            product, qty = best_size_fit(func_candidates, ingredient)
+            product, qty, exact = best_size_fit(func_candidates, ingredient)
             logger.info(f"[stock] functional substitution: {ingredient.name_en} -> {product.name_en}")
             return Match(
                 product=product,
                 status="substituted_functional",
                 quantity=qty,
+                size_approximated=not exact,
                 line_total=round(product.price_bdt * qty, 2),
                 note=f"{ingredient.name_en} is unavailable — added {product.name_en} as a cooking substitute (flavor may differ)",
             )

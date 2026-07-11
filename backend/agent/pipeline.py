@@ -281,7 +281,7 @@ def _apply_budget(
             continue
 
         cheapest = min(cheaper_pool, key=lambda p: p.price_bdt / max(p.unit_value, 1e-9))
-        product, qty = best_size_fit([cheapest], ing)
+        product, qty, exact = best_size_fit([cheapest], ing)
         new_line_total = round(product.price_bdt * qty, 2)
         if new_line_total >= match.line_total:
             continue  # no real savings, leave it
@@ -292,6 +292,7 @@ def _apply_budget(
             status="ok",
             quantity=qty,
             line_total=new_line_total,
+            size_approximated=not exact,
             note=f"Swapped to {product.name_en} to help fit your budget",
         )
 
@@ -410,6 +411,17 @@ def _assemble_reply(parsed: ParsedRequest, matches: list[Match], totals: dict) -
                 f"Sorry, I couldn't get {', '.join(essential_failures)} — no substitute worked for "
                 f"them either, so you may want to source them elsewhere for this dish."
             )
+
+    # A generic disclaimer, not a per-item list: best_size_fit() flags
+    # size_approximated whenever no real pack size hits the requested
+    # quantity exactly, which is true for most small recipe amounts
+    # against retail pack sizes (20gm salt against a 1kg bag is always
+    # "approximated" — that's just how grocery packaging works, not a
+    # matching problem) — naming every affected ingredient here would
+    # mean listing most of a typical recipe every time. One quiet,
+    # generic line covers it without turning into per-item noise.
+    if any(m.size_approximated and m.product for m in matches):
+        parts.append("Note: some items were added in the closest available pack size rather than an exact amount.")
 
     return " ".join(parts)
 
