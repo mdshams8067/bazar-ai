@@ -2,7 +2,7 @@
 
 An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products.
 
-**Live demo:** [bazar-ai.vercel.app](https://bazar-ai.vercel.app) — note: the backend runs on Render's free tier, so the first request after a period of inactivity can take up to ~50s to wake up (the app shows a banner while this happens).
+**Live demo:** [bazar-ai.vercel.app](https://bazar-ai.vercel.app) — the backend runs on Render's free tier, which sleeps after ~15 minutes of inactivity, but automated keep-alive pings (see "Known limitations" below) keep it warm in practice, so you shouldn't hit a cold start.
 
 **Bazar Buddy handling a real dish request end to end (web)** — asking what you already have at home, then filling the cart with a brand swap and an honest skip for the one thing not in stock.
 
