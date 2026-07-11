@@ -501,6 +501,38 @@ async def run_agent(
             parsed=parsed,
         )
 
+    # A recipe request with no stated (or inferable) serving size still
+    # got a real quantity for every ingredient before this gate existed —
+    # the LLM always fills in *some* number, so "noodles banabo" with no
+    # people mentioned silently guessed a serving size and added a full
+    # cart's worth, in the same turn as asking "how many people are you
+    # cooking for?" — a question with no reason to answer, since the
+    # shopping had already happened. cook_dish/budget_dish specifically
+    # (the two intents servings actually scales) skip matching entirely
+    # and wait for the answer instead, exactly like the other pure-
+    # question intents above. Only fires when the LLM itself couldn't
+    # resolve servings from context (parsed.servings is None) and is
+    # actually asking about it — a follow-up turn that includes serving
+    # size in history resolves normally and proceeds straight through.
+    if parsed.intent in ("cook_dish", "budget_dish") and parsed.servings is None and parsed.followup_question:
+        # A deterministic reply, not parsed.reply_context: the LLM writes
+        # that field assuming the normal flow (cart already filled), so
+        # it tends to say things like "I've prepared an ingredient list"
+        # — inaccurate and slightly confusing paired with a question
+        # that hasn't been answered yet, since nothing was actually
+        # prepared. Nothing here depends on LLM wording, so there's
+        # nothing to get wrong turn to turn.
+        dish = parsed.dish_name or "that"
+        return AgentResult(
+            reply=f"Happy to help with {dish}!",
+            intent=parsed.intent,
+            matches=[],
+            cart_actions=[],
+            totals={"subtotal_bdt": 0.0, "item_count": 0},
+            unmatched=[],
+            parsed=parsed,
+        )
+
     catalog = await _load_catalog(db)
 
     query_embeddings: dict[int, tuple[list[float], str, str]] = {}
