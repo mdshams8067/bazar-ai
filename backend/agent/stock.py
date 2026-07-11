@@ -16,6 +16,7 @@ from agent.matcher import (
     Match,
     MatchComponent,
     ParsedIngredient,
+    _retrieve_scored,
     best_size_fit,
     fuzzy_match,
     match_product,
@@ -76,12 +77,34 @@ def match_diy_substitute(ingredient: ParsedIngredient, catalog: list[Product]) -
 
 
 def same_category_in_stock(
-    ingredient: ParsedIngredient, catalog: list[Product], exclude: list[Product]
+    ingredient: ParsedIngredient,
+    catalog: list[Product],
+    exclude: list[Product],
+    query_embedding: list[float] | None = None,
+    query_embedding_model: str | None = None,
+    query_text: str | None = None,
 ) -> list[Product]:
     """In-stock products in the ingredient's category matching its search
     terms, excluding the already-tried (out-of-stock) candidates. Used for
     tier-1 brand substitution — e.g. ACI Chinigura Rice (out) -> Chashi
-    Chinigura Rice (in stock)."""
+    Chinigura Rice (in stock).
+
+    Tries plain keyword/fuzzy matching first (cheap, no network call) —
+    that alone covers the common case. Only falls back to the same
+    embedding-primary retrieval match_product() itself uses
+    (_retrieve_scored) if that finds nothing in stock, closing a real gap
+    found live: when embedding is the only method that can find an
+    ingredient at all (a genuine vocabulary/spelling gap — this catalog
+    spells it "soyabean", not "soybean"), and the single candidate
+    embedding found for the original request happens to be out of stock,
+    a plain keyword re-search here is blind to every other in-stock
+    sibling product for the exact same reason exact/fuzzy couldn't find
+    the ingredient in the first place. Verified live: "soybean oil" with
+    only the 1L Rupchanda pack out of stock fell through to a functional
+    substitute (sunflower oil) instead of the 7 other in-stock soyabean
+    oil products, purely because this tier's own search couldn't bridge
+    "soybean"/"soyabean" any better than the original exact/fuzzy tier
+    could."""
     excluded_ids = {p.id for p in exclude}
     pool = [p for p in catalog if p.category == ingredient.category_hint and p.id not in excluded_ids]
 
@@ -89,7 +112,15 @@ def same_category_in_stock(
     if not scored:
         scored = [(0, p) for p in fuzzy_match(pool, ingredient.search_terms)]
 
-    return [p for _, p in scored if p.stock_qty > 0]
+    in_stock = [p for _, p in scored if p.stock_qty > 0]
+    if in_stock:
+        return in_stock
+
+    if query_embedding is not None and query_embedding_model is not None and query_text is not None:
+        embed_scored = _retrieve_scored(ingredient, pool, query_embedding, query_embedding_model, query_text)
+        in_stock = [p for _, p in embed_scored if p.stock_qty > 0]
+
+    return in_stock
 
 
 def search_category_in_stock(term: str, catalog: list[Product]) -> list[Product]:
@@ -107,14 +138,29 @@ def search_category_in_stock(term: str, catalog: list[Product]) -> list[Product]
 
 
 def find_substitute(
-    ingredient: ParsedIngredient, oos_candidates: list[Product], catalog: list[Product]
+    ingredient: ParsedIngredient,
+    oos_candidates: list[Product],
+    catalog: list[Product],
+    query_embedding: list[float] | None = None,
+    query_embedding_model: str | None = None,
+    query_text: str | None = None,
 ) -> Match:
     """Runs the substitution tiers in order for an ingredient whose every
-    matched candidate is out of stock."""
+    matched candidate is out of stock. query_embedding/model/text
+    (optional, same triple match_product() already carries) let Tier 1's
+    own re-search fall back to embedding retrieval too — see
+    same_category_in_stock()'s docstring for why that matters."""
     oos_name = oos_candidates[0].name_en if oos_candidates else ingredient.name_en
 
     # TIER 1 — brand substitution.
-    brand_candidates = same_category_in_stock(ingredient, catalog, exclude=oos_candidates)
+    brand_candidates = same_category_in_stock(
+        ingredient,
+        catalog,
+        exclude=oos_candidates,
+        query_embedding=query_embedding,
+        query_embedding_model=query_embedding_model,
+        query_text=query_text,
+    )
     if brand_candidates:
         product, qty = best_size_fit(brand_candidates, ingredient)
         logger.info(f"[stock] brand substitution: {oos_name} -> {product.name_en}")

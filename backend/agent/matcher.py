@@ -537,4 +537,4 @@ def match_product(
     # Every top-tier candidate is out of stock -> substitution tiers.
     from agent.stock import find_substitute  # local import breaks the circular dependency
 
-    return find_substitute(ingredient, top_tier, catalog)
+    return find_substitute(ingredient, top_tier, catalog, query_embedding, query_embedding_model, query_text)
