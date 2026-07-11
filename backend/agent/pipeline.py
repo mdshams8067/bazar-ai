@@ -617,6 +617,22 @@ async def run_agent(
         f"servings={parsed.servings} ingredients={len(parsed.ingredients)}"
     )
 
+    # Live report: "now add for a chocolate mousse... making for 2
+    # people" came back as add_items instead of cook_dish, which skips
+    # both the servings/pantry gates below AND turns on ask_pack_size,
+    # so a genuine dish request ended up asking "which size?" for every
+    # ingredient in a row instead of auto-sizing them from the recipe.
+    # prompts.py's own schema says dish_name/servings are only ever
+    # populated for cook_dish/budget_dish — so an add_items response
+    # that still filled both in is internally inconsistent, a reliable
+    # sign the intent field itself is the wrong one, not the dish/
+    # servings the model already correctly understood. Corrected the
+    # same way the pantry-response drift below already is: fix the
+    # specific, detectable inconsistency rather than reshaping intent
+    # classification generally.
+    if parsed.intent == "add_items" and parsed.dish_name and parsed.servings:
+        parsed.intent = "cook_dish"
+
     # remove_items/clear_cart/keep_only_items target the user's existing
     # CART, not the catalog — there's nothing here for match_product() to
     # do. The router (routers/chat.py) handles the actual cart mutation
