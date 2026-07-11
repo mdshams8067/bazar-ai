@@ -2,6 +2,17 @@
 
 An AI-assisted grocery shopping experience for the Bangladeshi market — tell it what you're cooking, and it fills your cart with real, in-stock products.
 
+**What it does:**
+
+1. Tell it what you're cooking ("morog polao for 6") and it fills your cart with real ingredients that are actually in stock — no manual searching.
+2. It also works like a normal shopping list — "add ketchup," "remove the rice," "empty my cart" — not just recipes.
+3. Before it shops for a recipe, it asks how many people you're feeding and what you already have at home, so it doesn't add things you don't need.
+4. If something's out of stock, it finds a real substitute — a different brand, a similar product, or even a homemade alternative — and if nothing works, it tells you honestly instead of pretending it succeeded.
+5. Ask it cooking questions too ("is olive oil essential to pesto?") and it answers directly.
+6. You can also just browse and shop the catalog yourself — search, filter by category, no assistant required.
+7. Checkout with cash on delivery or online payment, and track your order afterward.
+8. Everything works the same way on the website and the Android app — same account, same cart, either way.
+
 **Live demo:** [bazar-ai.vercel.app](https://bazar-ai.vercel.app) — the backend runs on Render's free tier, which sleeps after ~15 minutes of inactivity, but automated keep-alive pings (see "Known limitations" below) keep it warm in practice, so you shouldn't hit a cold start.
 
 **Bazar Buddy handling a real dish request end to end (web)** — asking what you already have at home, then filling the cart with a brand swap and an honest skip for the one thing not in stock.
