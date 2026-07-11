@@ -34,9 +34,37 @@ OUTPUT SCHEMA:
                         including Bangla romanizations: e.g. for onion:
                         ["onion", "piyaj", "peyaj"]>],
       "category_hint": <string: one of "Rice", "Meat", "Fish", "Spices",
-                        "Soybean Oil", "Mustard Oil", "Dairy", "Eggs",
-                        "Fruits And Vegetables", "Daal Or Lentil",
-                        "Salt And Sugar", "Baking Needs", "other">,
+                        "Soybean Oil", "Mustard Oil", "Sunflower Oil",
+                        "Olive Oil", "Rice Bran Oil", "Flavored Oil",
+                        "Dairy", "Eggs", "Fruits And Vegetables",
+                        "Daal Or Lentil", "Salt And Sugar", "Baking Needs",
+                        "Sauces And Pickles", "Snacks", "Beverages",
+                        "Candy Chocolate", "Ready Mix", "Frozen",
+                        "Breakfast", "Ice Cream", "Canned Food", "other">.
+                        This MUST be one of these exact 24 real catalog
+                        categories — never invent or approximate one, and
+                        never force an item into a near-but-wrong category
+                        just because its real category isn't top-of-mind
+                        (e.g. ketchup is "Sauces And Pickles", NOT "Salt
+                        And Sugar"; olive oil is its own "Olive Oil"
+                        category, NOT "Soybean Oil" — oils are six
+                        separate categories here, not one). This catalog's
+                        own category scheme is sometimes non-obvious —
+                        it's how the store itself shelves things, not
+                        always the most "logical" grouping — so trust
+                        these confirmed examples over instinct: pasta/
+                        noodles/macaroni is "Snacks" (not "Baking Needs"
+                        or "Breakfast"); mayonnaise is "Breakfast" (not
+                        "Sauces And Pickles", even though it seems like a
+                        condiment); honey, jam, and jelly are all
+                        "Breakfast" (not "Sauces And Pickles" or "Baking
+                        Needs"); muffins are "Snacks" (not "Breakfast");
+                        ghee is "Dairy" (not an oil category — it's
+                        clarified butter, shelved with dairy here). Use
+                        "other" only for something genuinely outside all
+                        24 (it falls back to a full-catalog search, which
+                        is slower and noisier, so only a real last
+                        resort).>,
       "quantity": <number: amount needed for the stated servings>,
       "quantity_unit": <"kg" | "gm" | "ltr" | "ml" | "pcs">,
       "quantity_stated": <boolean: true only if the customer explicitly

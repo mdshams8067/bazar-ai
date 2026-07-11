@@ -15,6 +15,7 @@ from statistics import median
 
 from rapidfuzz import fuzz
 
+from core.config import ENABLE_EMBEDDING_MATCH, ENABLE_EXACT_FUZZY_MATCH
 from models.product import Product
 
 logger = logging.getLogger(__name__)
@@ -371,11 +372,45 @@ def _apply_specific_variant_check(ingredient: ParsedIngredient, match: Match) ->
     )
 
 
+def _retrieve_scored(
+    ingredient: ParsedIngredient,
+    pool: list[Product],
+    query_embedding: list[float] | None,
+    query_embedding_model: str | None,
+    query_text: str | None,
+) -> list[tuple[int, Product]]:
+    """Runs the retrieval cascade (embedding primary, exact/fuzzy
+    fallback) against `pool` and returns (score, product) pairs, or an
+    empty list if nothing was found. Factored out of match_product() so
+    it can be tried twice — once against the category-hinted pool, once
+    against the full catalog if that comes up empty — see
+    match_product()'s category_hint fallback for why."""
+    scored: list[tuple[int, Product]] = []
+    if ENABLE_EMBEDDING_MATCH and query_embedding is not None and query_embedding_model is not None and query_text is not None:
+        from agent.embedding_match import embedding_candidates
+
+        embed_candidates = embedding_candidates(
+            query_embedding, query_embedding_model, query_text, pool, ingredient.name_en
+        )
+        if embed_candidates:
+            scored = [(0, p) for p in embed_candidates]
+
+    if not scored and ENABLE_EXACT_FUZZY_MATCH:
+        scored = score_candidates(pool, ingredient.search_terms, primary_term=ingredient.name_en)
+        if not scored:
+            fuzzy_candidates = fuzzy_match(pool, ingredient.search_terms)
+            scored = [(0, p) for p in fuzzy_candidates]
+            scored.sort(key=lambda pair: (-pair[0], pair[1].id))
+
+    return scored
+
+
 def match_product(
     ingredient: ParsedIngredient,
     catalog: list[Product],
     query_embedding: list[float] | None = None,
     query_embedding_model: str | None = None,
+    query_text: str | None = None,
 ) -> Match:
     """Matches one ingredient to a real catalog product, deterministically.
 
@@ -407,32 +442,43 @@ def match_product(
     Gemini API-key/model rotation (core/gemini_client.py) can mean this
     particular query was embedded with a different model than most of the
     catalog — embedding_candidates() only ever compares same-model vectors,
-    see agent/embedding_match.py. When query_embedding is None (the
-    default — no config change needed to keep today's exact behavior),
-    this is a no-op and the cascade is byte-for-byte unchanged."""
-    pool = [p for p in catalog if p.category == ingredient.category_hint]
-    if not pool:
-        pool = catalog
+    see agent/embedding_match.py. query_text is the same query in plain
+    text, needed separately because embedding_candidates() reranks its
+    cosine-similarity shortlist with a cross-encoder (core/jina_client.py)
+    that reasons over query and candidate text together, not just two
+    independently-computed vectors. The reranker's own top pick still
+    goes through one more check — an LLM verifies/selects among its top
+    few candidates — before embedding_candidates() returns anything:
+    live testing showed the reranker can be just as confident about a
+    forced-but-wrong pick as a genuinely correct one (see
+    agent/embedding_match.py's module docstring), so score/margin alone
+    isn't a safe accept/reject signal on its own. When query_embedding is
+    None (the default — no config change needed to keep today's exact
+    behavior), this is a no-op and the cascade is byte-for-byte
+    unchanged."""
+    category_pool = [p for p in catalog if p.category == ingredient.category_hint]
+    scored = _retrieve_scored(
+        ingredient, category_pool or catalog, query_embedding, query_embedding_model, query_text
+    )
 
-    scored = score_candidates(pool, ingredient.search_terms, primary_term=ingredient.name_en)
-    if not scored:
-        fuzzy_candidates = fuzzy_match(pool, ingredient.search_terms)
-        combined = fuzzy_candidates
-        if query_embedding is not None and query_embedding_model is not None:
-            from agent.embedding_match import embedding_candidates
-
-            embed_candidates = embedding_candidates(query_embedding, query_embedding_model, pool)
-            if embed_candidates:
-                seen_ids = {p.id for p in fuzzy_candidates}
-                new_from_embedding = [p for p in embed_candidates if p.id not in seen_ids]
-                if new_from_embedding:
-                    logger.info(
-                        f"[matcher] embedding retrieval found {len(new_from_embedding)} extra "
-                        f"candidate(s) for '{ingredient.name_en}' that exact/fuzzy missed"
-                    )
-                combined = fuzzy_candidates + new_from_embedding
-        scored = [(0, p) for p in combined]
-        scored.sort(key=lambda pair: (-pair[0], pair[1].id))
+    # category_hint is an LLM guess made in the same single parsing call
+    # as everything else, before any catalog lookup — it's pattern-
+    # matched from general grocery-taxonomy knowledge, not grounded in
+    # this specific catalog's own (sometimes idiosyncratic) scheme. Live
+    # auditing found it wrong on a real, non-trivial fraction of terms
+    # (ketchup guessed "Salt And Sugar" instead of "Sauces And Pickles";
+    # olive oil guessed "Soybean Oil" instead of its own "Olive Oil"
+    # category; the same ingredient can even get a different guess
+    # between calls depending on phrasing — see PROJECT_CONTEXT.md). A
+    # wrong guess used to permanently hide the real product: category
+    # filtering happened before retrieval, so nothing outside the
+    # (wrong) guessed category was ever even considered. If the guessed
+    # category's pool has nothing for it, retry once against the whole
+    # catalog before giving up — cheap (every retrieval tier here
+    # already scales fine to the full ~2,807-product catalog) and closes
+    # this failure mode without needing category_hint to be reliable.
+    if not scored and category_pool:
+        scored = _retrieve_scored(ingredient, catalog, query_embedding, query_embedding_model, query_text)
 
     if not scored:
         if not ingredient.essential:

@@ -102,15 +102,46 @@ class Settings(BaseSettings):
         return v
 
     # ── Matcher: embedding-based retrieval (Layer 1) ──────────────────────
-    # When the exact/fuzzy keyword cascade in agent/matcher.py finds nothing,
-    # optionally also try embedding similarity (a wider net for genuine
-    # vocabulary mismatches, e.g. "chickpea flour" vs. a catalog product
-    # named "Besan") before giving up. Purely additive — every downstream
-    # decision (stock, price, substitution tiers) stays the same deterministic
-    # code regardless of which tier found the candidate. Off by default so
-    # this whole layer can be enabled/disabled with one env var, no revert
-    # needed, if it ever needs to be pulled out.
-    ENABLE_EMBEDDING_MATCH: bool = False
+    # Primary retrieval method in agent/matcher.py's match_product(): tried
+    # first for every ingredient. Promoted from an off-by-default fallback
+    # to the primary path after live testing found real exact-tier bugs
+    # embedding got right and exact/fuzzy didn't — a generic shared word
+    # ("flour" matching "Tempura Flour" for a plain "all purpose flour"
+    # request) and a flawed tie-break heuristic (picking "Mishti Alu/Sweet
+    # Potato" over the real "Alu/Potato" product) — see PROJECT_CONTEXT.md
+    # for the full evidence. Every downstream decision (stock, price,
+    # substitution tiers) stays the same deterministic code regardless of
+    # which tier found the candidate. Setting this False reverts the
+    # matcher to pure exact/fuzzy keyword matching, byte-for-byte the same
+    # as before this whole embedding addition existed — the one-env-var
+    # full rollback this project has kept available throughout.
+    ENABLE_EMBEDDING_MATCH: bool = True
+    # Exact/fuzzy keyword matching, now the secondary/fallback method —
+    # tried only when embedding matching is off, unavailable (e.g. a
+    # provider outage — query_embedding comes back None), or finds
+    # nothing. On by default specifically so a Jina outage degrades to
+    # keyword-only matching rather than breaking the whole matcher; set
+    # False for a deliberate pure-embedding-only run (e.g. to reproduce a
+    # calibration result without exact/fuzzy's fallback masking it).
+    ENABLE_EXACT_FUZZY_MATCH: bool = True
+    # "jina" (default) or "gemini" — which provider actually computes
+    # embeddings/reranking. Verified live: Jina's embed+rerank pair,
+    # specifically jina-reranker-v3, separates genuine synonyms (ghee/
+    # clarified butter, brinjal/eggplant) from known false positives much
+    # more reliably than raw Gemini cosine similarity did — see
+    # PROJECT_CONTEXT.md for the full calibration writeup, including two
+    # rejected candidates along the way (jina-reranker-v2-base-multilingual
+    # scored almost entirely on literal keyword overlap and failed most
+    # true synonym pairs; Voyage's rerank API works but its free tier caps
+    # at 3 requests/minute without a billing method, too slow for this
+    # catalog's bulk re-embed). Gemini's embedding path (below) is kept as
+    # a coded fallback, not deleted, in case Jina's key/quota is ever
+    # unavailable. Jina's models are CC-BY-NC 4.0 — non-commercial use only;
+    # noted, not a blocker for a take-home submission, but a real
+    # consideration if this app were ever run as an actual commercial
+    # service.
+    EMBEDDING_PROVIDER: str = "jina"
+    EMBEDDING_FALLBACK_PROVIDER: str = "gemini"
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     # Tried, same API key, before rotating to the next key (see
     # core/gemini_client.py) — a separate model on the same key has its own
@@ -119,6 +150,28 @@ class Settings(BaseSettings):
     # above — kept separate since an embedding model and a chat model are
     # never interchangeable.)
     EMBEDDING_MODEL_FALLBACK: str = "gemini-embedding-2"
+
+    # ── Jina AI (primary embedding + reranking provider) ───────────────────
+    # Called via plain REST + `requests`, no SDK — same pattern as every
+    # other provider in this project, and avoids any risk of a heavy SDK
+    # pulling in unwanted transitive dependencies (already ruled out once
+    # for Voyage's official SDK, which pulls in LangChain packages this
+    # project deliberately doesn't use).
+    JINA_API_KEY: str = ""
+    JINA_EMBEDDING_MODEL: str = "jina-embeddings-v3"
+    # v3, not the older v2-base-multilingual: verified live that v2 scores
+    # almost purely on literal word overlap ("ghee" vs the product name
+    # "...Ghee..." scored 0.68; "clarified butter" vs the identical product
+    # scored 0.02, indistinguishable from a genuinely unrelated item) — it
+    # doesn't solve the vocabulary-mismatch problem this whole feature
+    # exists for. v3 correctly ranks true synonyms in ~9/11 hand-built test
+    # cases, a real improvement, not merely a newer version number.
+    JINA_RERANK_MODEL: str = "jina-reranker-v3"
+    # Free tier: 100 requests/minute, 100,000 tokens/minute (verified via
+    # the account's own dashboard) — comfortably enough for both the
+    # one-time catalog re-embed and live chat traffic at this project's
+    # scale, unlike Voyage's 3 RPM.
+    JINA_REQUESTS_PER_MINUTE: int = 100
 
     # ── Groq ──────────────────────────────────────────────────────────────
     GROQ_API_KEY: str = ""
@@ -175,8 +228,15 @@ GEMINI_TEXT_MODELS_FALLBACK = settings.GEMINI_TEXT_MODELS_FALLBACK
 # mistake, blanks dropped.
 GEMINI_API_KEYS = list(dict.fromkeys(k for k in [GOOGLE_API_KEY, *GOOGLE_API_KEYS_EXTRA] if k))
 ENABLE_EMBEDDING_MATCH = settings.ENABLE_EMBEDDING_MATCH
+ENABLE_EXACT_FUZZY_MATCH = settings.ENABLE_EXACT_FUZZY_MATCH
+EMBEDDING_PROVIDER = settings.EMBEDDING_PROVIDER
+EMBEDDING_FALLBACK_PROVIDER = settings.EMBEDDING_FALLBACK_PROVIDER
 EMBEDDING_MODEL = settings.EMBEDDING_MODEL
 EMBEDDING_MODEL_FALLBACK = settings.EMBEDDING_MODEL_FALLBACK
+JINA_API_KEY = settings.JINA_API_KEY
+JINA_EMBEDDING_MODEL = settings.JINA_EMBEDDING_MODEL
+JINA_RERANK_MODEL = settings.JINA_RERANK_MODEL
+JINA_REQUESTS_PER_MINUTE = settings.JINA_REQUESTS_PER_MINUTE
 GROQ_API_KEY = settings.GROQ_API_KEY
 GROQ_TEXT_MODEL = settings.GROQ_TEXT_MODEL
 GROQ_TEXT_MODELS_FALLBACK = settings.GROQ_TEXT_MODELS_FALLBACK

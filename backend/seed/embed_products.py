@@ -1,18 +1,22 @@
 """
 seed/embed_products.py — One-off backfill: computes and stores an embedding
-vector for every product's name_en, for the optional Layer 1
-embedding-retrieval addition (see ENABLE_EMBEDDING_MATCH in core/config.py
-and agent/embedding_match.py).
+vector for every product, for the optional Layer 1 embedding-retrieval
+addition (see ENABLE_EMBEDDING_MATCH in core/config.py and
+agent/embedding_match.py).
+
+Embeds Product.embedding_source_text (the noise-stripped, synonym-expanded
+text seed/enrich_labels.py generates — see that module's docstring for why
+embedding the raw scraped name directly was measurably worse), falling
+back to raw name_en for any product enrich_labels.py hasn't reached yet.
 
 Only needs to be (re-)run when the catalog changes — after seed.seed_db, or
-whenever new products are added. Safe to re-run any time: by default only
+whenever new products are added — or after switching EMBEDDING_PROVIDER,
+since two providers' vectors aren't comparable (see Product.embedding_model
+and agent/embedding_match.py). Safe to re-run any time: by default only
 fills in products with no embedding yet (see backfill()'s only_missing
 param), so re-running after a partial run (e.g. a quota wall — see
 PROJECT_CONTEXT.md) or on a growing catalog never wastes quota re-embedding
-what already succeeded. Each product also records which model actually
-embedded it (embedding_model — core/gemini_client.py can rotate models
-mid-run), since agent/embedding_match.py must never compare vectors from
-two different embedding models.
+what already succeeded. Pass only_missing=False to force a full re-embed.
 
 Run as a script: `python -m seed.embed_products` from backend/ (venv active).
 """
@@ -27,9 +31,9 @@ from models.product import Product
 
 logger = logging.getLogger(__name__)
 
-# Gemini's embed_content accepts a batch per call, but very large batches
-# risk hitting per-request payload/rate limits — chunking keeps each call
-# small and keeps a partial failure from losing all prior progress.
+# Jina's free tier (100 RPM / 100K TPM) comfortably handles this batch
+# size — kept the same as before rather than tuned larger, since a
+# partial-batch failure loses less progress this way.
 _BATCH_SIZE = 100
 
 _sync_engine = create_engine(DATABASE_URL)
@@ -37,13 +41,14 @@ _SyncSession = sessionmaker(bind=_sync_engine)
 
 
 def backfill(only_missing: bool = True) -> int:
-    """Embeds and stores name_en for every product. Returns row count updated.
+    """Embeds and stores embedding_source_text (or name_en, if not yet
+    enriched) for every product. Returns row count updated.
 
     only_missing=True (default) skips products that already have an
     embedding — safe to re-run after a partial run (e.g. hitting the
     embedding API's free-tier daily quota partway through a large catalog)
     without wasting quota re-embedding what already succeeded. Pass False
-    to force a full re-embed (e.g. after switching EMBEDDING_MODEL)."""
+    to force a full re-embed (e.g. after switching EMBEDDING_PROVIDER)."""
     db = _SyncSession()
     try:
         query = db.query(Product).order_by(Product.id)
@@ -52,7 +57,8 @@ def backfill(only_missing: bool = True) -> int:
         products = query.all()
         for start in range(0, len(products), _BATCH_SIZE):
             batch = products[start : start + _BATCH_SIZE]
-            results = embed_texts([p.name_en for p in batch])
+            texts = [p.embedding_source_text or p.name_en for p in batch]
+            results = embed_texts(texts)
             for product, (vector, model) in zip(batch, results):
                 product.embedding = vector
                 product.embedding_model = model

@@ -37,3 +37,15 @@ class Product(Base):
     # query embedding against product embeddings tagged with this same
     # value, never across models.
     embedding_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The actual text that was embedded — NOT necessarily name_en verbatim.
+    # seed/enrich_labels.py generates a noise-stripped, synonym-expanded
+    # version (brand/pack-size/container dropped, English synonyms +
+    # Banglish terms added) via the LLM once per product, since embedding
+    # the raw scraped label directly was measurably worse at recognizing
+    # genuine synonyms (ghee/clarified butter, brinjal/eggplant) — see
+    # PROJECT_CONTEXT.md. Stored (not just used transiently) so it's
+    # possible to inspect exactly what a given product's embedding is
+    # actually based on, rather than trusting a vector blindly. Null until
+    # enrich_labels.py runs; embed_products.py falls back to raw name_en
+    # for any product without it.
+    embedding_source_text: Mapped[str | None] = mapped_column(String, nullable=True)

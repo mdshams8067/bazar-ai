@@ -29,6 +29,7 @@ import re
 import sqlite3
 import time
 from pathlib import Path
+from typing import Callable
 
 from core.config import (
     LLM_PROVIDER, LLM_FALLBACK_PROVIDER,
@@ -90,12 +91,27 @@ def _cache_set(key: str, response: str) -> None:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def chat(system: str, user: str, max_tokens: int = 1024, temperature: float = 0.2,
-         use_cache: bool = True) -> str:
+         use_cache: bool = True, should_cache: Callable[[str], bool] | None = None) -> str:
     """Send a system + user prompt; return the model's text response.
 
     Tries LLM_PROVIDER first. If it hits a rate limit (HTTP 429) or otherwise
     exhausts its retries, fails over to LLM_FALLBACK_PROVIDER. Raises
     LLMUnavailableError only if both providers fail.
+
+    should_cache (optional): predicate on a freshly-generated response
+    deciding whether it's worth writing to cache at all. Doesn't affect
+    lookups — an existing cache hit is always honored — only whether a new
+    response gets persisted. For a caller whose response space includes a
+    "reject"/negative answer (e.g. agent/embedding_match.py's LLM
+    verification gate), caching that outcome is dangerous: LLM output at
+    temperature=0 isn't perfectly deterministic (confirmed live — the same
+    prompt returned a wrong "NONE" once, then "1" three times in a row on
+    retry), so a single unlucky negative response, once cached, would
+    permanently and silently block a genuinely correct match with no way
+    to self-correct on a later, better-luck call. Passing e.g.
+    `lambda r: r.strip().upper() != "NONE"` lets a bad negative retry
+    fresh next time instead of sticking forever, while still caching (and
+    getting the cost benefit of) every positive response.
     """
     key = None
     if use_cache:
@@ -114,7 +130,7 @@ def chat(system: str, user: str, max_tokens: int = 1024, temperature: float = 0.
     for provider in providers:
         try:
             response = _dispatch(provider, system, user, max_tokens, temperature)
-            if use_cache:
+            if use_cache and (should_cache is None or should_cache(response)):
                 _cache_set(key, response)
             return response
         except _RateLimited as e:

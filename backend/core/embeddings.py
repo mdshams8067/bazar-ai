@@ -1,11 +1,15 @@
 """
-core/embeddings.py — Gemini embedding-vector wrapper.
+core/embeddings.py — Provider-agnostic embedding-vector wrapper.
 
-Same shape as core/llm.py: a thin, provider-specific wrapper plus a cache,
-so callers never touch the SDK directly and never pay twice for an
-identical text. Used only by the Layer 1 retrieval addition in
-agent/embedding_match.py — nothing else in this codebase calls it, and it's
-inert unless ENABLE_EMBEDDING_MATCH=true (see core/config.py).
+Same shape as core/llm.py: a thin, provider-abstracted wrapper plus a
+cache, so callers never touch a provider's API directly and never pay
+twice for an identical text. Jina is the primary provider (EMBEDDING_
+PROVIDER, default "jina"), Gemini the coded fallback (EMBEDDING_FALLBACK_
+PROVIDER) if Jina's key/quota is ever unavailable — same primary/fallback
+shape core/llm.py already uses for Gemini/Groq. Used only by the Layer 1
+retrieval addition in agent/embedding_match.py — nothing else in this
+codebase calls it, and it's inert unless ENABLE_EMBEDDING_MATCH=true (see
+core/config.py).
 
 The cache lives in the same database as everything else (models/
 embedding_cache.py, Postgres in prod / SQLite locally via the usual
@@ -35,7 +39,14 @@ import time
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from core.config import DATABASE_URL, EMBEDDING_MODEL, EMBEDDING_MODEL_FALLBACK
+from core.config import (
+    DATABASE_URL,
+    EMBEDDING_FALLBACK_PROVIDER,
+    EMBEDDING_MODEL,
+    EMBEDDING_MODEL_FALLBACK,
+    EMBEDDING_PROVIDER,
+    JINA_EMBEDDING_MODEL,
+)
 from core.gemini_client import GeminiAllKeysExhausted, RotatableModelError, call_with_rotation
 from models.embedding_cache import EmbeddingCacheEntry
 
@@ -95,7 +106,7 @@ def embed_texts(texts: list[str], use_cache: bool = True) -> list[tuple[list[flo
 
         missing_idx = [i for i, k in enumerate(keys) if k not in cached]
         if missing_idx:
-            fresh_vectors, model_used = _gemini_embed([texts[i] for i in missing_idx])
+            fresh_vectors, model_used = _dispatch_embed([texts[i] for i in missing_idx])
             new_entries = {keys[i]: (vec, model_used) for i, vec in zip(missing_idx, fresh_vectors)}
             cached.update(new_entries)
             if use_cache:
@@ -111,6 +122,39 @@ async def aembed_texts(texts: list[str], use_cache: bool = True) -> list[tuple[l
     cache lookup alongside it) so the FastAPI event loop is never blocked
     (same pattern as llm.achat)."""
     return await asyncio.to_thread(embed_texts, texts, use_cache)
+
+
+def _dispatch_embed(texts: list[str]) -> tuple[list[list[float]], str]:
+    """Tries EMBEDDING_PROVIDER first, falls over to EMBEDDING_FALLBACK_
+    PROVIDER only if the primary raises — same primary/fallback shape
+    core/llm.py already uses for Gemini/Groq, just for embeddings."""
+    providers = [EMBEDDING_PROVIDER]
+    if EMBEDDING_FALLBACK_PROVIDER and EMBEDDING_FALLBACK_PROVIDER != EMBEDDING_PROVIDER:
+        providers.append(EMBEDDING_FALLBACK_PROVIDER)
+
+    last_error: Exception | None = None
+    for provider in providers:
+        try:
+            if provider == "jina":
+                return _jina_embed(texts)
+            return _gemini_embed(texts)
+        except Exception as e:
+            logger.warning(f"[embeddings] provider={provider} failed, trying next: {e}")
+            last_error = e
+            continue
+
+    raise RuntimeError(f"All embedding providers exhausted: {providers}") from last_error
+
+
+def _jina_embed(texts: list[str]) -> tuple[list[list[float]], str]:
+    """No key rotation (only one Jina key configured) — Jina's own client
+    (core/jina_client.py) already retries transient rate limits with
+    backoff; a failure that survives those retries propagates here and
+    triggers the Gemini fallback above instead."""
+    from core.jina_client import embed_texts as jina_embed
+
+    vectors = jina_embed(texts, model=JINA_EMBEDDING_MODEL)
+    return vectors, JINA_EMBEDDING_MODEL
 
 
 def _gemini_embed(texts: list[str]) -> tuple[list[list[float]], str]:
