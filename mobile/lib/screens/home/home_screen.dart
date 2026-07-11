@@ -1,13 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/common/how_it_works_dialog.dart';
 import '../../widgets/layout/app_header.dart';
 import '../../widgets/product/category_grid.dart';
 
-class HomeScreen extends StatelessWidget {
+const _hasSeenHowItWorksKey = 'has_seen_how_it_works';
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Post-frame, not directly in initState: showDialog needs a fully
+    // built widget tree/Navigator to attach to, which isn't guaranteed
+    // to exist yet on the very first build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowHowItWorks());
+  }
+
+  Future<void> _maybeShowHowItWorks() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_hasSeenHowItWorksKey) ?? false) return;
+    await prefs.setBool(_hasSeenHowItWorksKey, true);
+    if (!mounted) return;
+    showDialog(context: context, builder: (_) => const HowItWorksDialog());
+  }
 
   @override
   Widget build(BuildContext context) {
