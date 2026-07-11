@@ -6,11 +6,11 @@ An AI-assisted grocery shopping experience for the Bangladeshi market — tell i
 
 **Bazar Buddy handling a real dish request end to end (web)** — asking what you already have at home, then filling the cart with a brand swap and an honest skip for the one thing not in stock.
 
-<img src="docs/media/web_demo.gif" alt="Bazar Buddy handling a biriyani request on the web app, including the pantry-check follow-up and the resulting cart with a brand swap and a skipped item" width="480">
+<img src="docs/media/web_demo.gif" alt="Bazar Buddy handling a biriyani request on the web app, including the pantry-check follow-up and the resulting cart with a brand swap and a skipped item" width="100%">
 
 **The same backend and catalog, native on Android (Flutter):**
 
-<img src="docs/media/mobile_home.gif" alt="The Flutter mobile app running the same Bazar Buddy conversation" width="260">
+<p align="center"><img src="docs/media/mobile_home.gif" alt="The Flutter mobile app running the same Bazar Buddy conversation" width="320"></p>
 
 ## Data pipeline
 
