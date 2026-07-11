@@ -41,7 +41,7 @@ OUTPUT SCHEMA:
                         "Sauces And Pickles", "Snacks", "Beverages",
                         "Candy Chocolate", "Ready Mix", "Frozen",
                         "Breakfast", "Ice Cream", "Canned Food", "other">.
-                        This MUST be one of these exact 24 real catalog
+                        This MUST be one of these exact 25 real catalog
                         categories — never invent or approximate one, and
                         never force an item into a near-but-wrong category
                         just because its real category isn't top-of-mind
@@ -62,7 +62,7 @@ OUTPUT SCHEMA:
                         ghee is "Dairy" (not an oil category — it's
                         clarified butter, shelved with dairy here). Use
                         "other" only for something genuinely outside all
-                        24 (it falls back to a full-catalog search, which
+                        25 (it falls back to a full-catalog search, which
                         is slower and noisier, so only a real last
                         resort).>,
       "quantity": <number: amount needed for the stated servings>,
