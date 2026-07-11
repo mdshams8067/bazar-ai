@@ -8,9 +8,11 @@ it's assembled from templates so it stays reliable and free.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
@@ -184,13 +186,14 @@ async def _embed_ingredients(ingredients: list[ParsedIngredient]) -> dict[int, t
     return {id(ing): (vec, model, text) for ing, (vec, model), text in zip(ingredients, results, texts)}
 
 
-def _match_ingredients(
+async def _match_ingredients(
     ingredients: list[ParsedIngredient],
     catalog: list[Product],
     ask_pack_size: bool = False,
     query_embeddings: dict[int, tuple[list[float], str, str]] | None = None,
 ) -> list[Match]:
-    """Matches every ingredient; a failure on one never aborts the rest.
+    """Matches every ingredient concurrently; a failure on one never
+    aborts the rest.
 
     ask_pack_size (add_items only): if the customer named a product but
     didn't state a size, and that product genuinely comes in more than
@@ -203,44 +206,45 @@ def _match_ingredients(
 
     query_embeddings (optional): id(ingredient) -> (embedding vector,
     model that produced it, plain query text), computed once up front in
-    run_agent (a single batched async API call) rather than per ingredient
-    here — this loop, and match_product() itself, stay fully synchronous
-    either way. See match_product's own docstring for what this actually
-    changes.
-    """
-    matches = []
-    for ing in ingredients:
+    run_agent (a single batched async API call) rather than per
+    ingredient here. match_product() itself is still a plain sync
+    function (its embedding-tier calls to Jina/the LLM go through
+    blocking `requests`, not an async client), so each ingredient's
+    match is run in its own thread via asyncio.to_thread — measured live
+    at up to ~2-3s per ingredient when it reaches the embedding tier
+    (cosine + rerank + verification are all real network calls), which
+    made a 9-ingredient dish take ~6s sequentially; concurrently, total
+    time is close to the slowest single ingredient instead of the sum of
+    all of them. Order of the returned list matches `ingredients`,
+    exactly like the old sequential loop — asyncio.gather preserves
+    argument order regardless of which task finishes first."""
+
+    def _match_one(ing: ParsedIngredient) -> Match:
         try:
             if ask_pack_size and not ing.quantity_stated:
                 options = find_pack_size_options(ing, catalog)
                 if options:
-                    matches.append(
-                        Match(
-                            product=None,
-                            status="needs_clarification",
-                            candidates=options,
-                            note=f"Which size {ing.name_en} would you like? Pick an option below.",
-                        )
+                    return Match(
+                        product=None,
+                        status="needs_clarification",
+                        candidates=options,
+                        note=f"Which size {ing.name_en} would you like? Pick an option below.",
                     )
-                    continue
             query_embedding, query_embedding_model, query_text = (query_embeddings or {}).get(
                 id(ing), (None, None, None)
             )
-            matches.append(
-                match_product(
-                    ing,
-                    catalog,
-                    query_embedding=query_embedding,
-                    query_embedding_model=query_embedding_model,
-                    query_text=query_text,
-                )
+            return match_product(
+                ing,
+                catalog,
+                query_embedding=query_embedding,
+                query_embedding_model=query_embedding_model,
+                query_text=query_text,
             )
         except Exception:
             logger.exception(f"[pipeline] matching failed for ingredient: {ing.name_en}")
-            matches.append(
-                Match(product=None, status="error", note=f"Something went wrong matching {ing.name_en}.")
-            )
-    return matches
+            return Match(product=None, status="error", note=f"Something went wrong matching {ing.name_en}.")
+
+    return list(await asyncio.gather(*(asyncio.to_thread(_match_one, ing) for ing in ingredients)))
 
 
 def _apply_budget(
@@ -410,6 +414,37 @@ def _assemble_reply(parsed: ParsedRequest, matches: list[Match], totals: dict) -
     return " ".join(parts)
 
 
+_CATALOG_CACHE_TTL_SECONDS = 30
+_catalog_cache: tuple[float, list[Product]] | None = None
+
+
+async def _load_catalog(db: AsyncSession) -> list[Product]:
+    """Loads every product, including its embedding vector — measured
+    live at ~14s to fetch all ~2,807 products' embeddings over the
+    network to Supabase, the single biggest latency contributor once
+    embedding retrieval became Layer 1's primary method (run on every
+    chat message, not just a rare fallback case). Cached in memory for
+    _CATALOG_CACHE_TTL_SECONDS, since the catalog changes rarely between
+    requests. Stock can read up to this many seconds stale within that
+    window, but that's an accepted, bounded trade-off, not a correctness
+    risk: checkout independently re-validates real stock before an order
+    is ever placed, regardless of what this cache shows a chat message.
+    Cached rows are expunged from their loading session (`db.expunge_all`)
+    so they stay safely readable after that session closes — every
+    downstream use only reads already-loaded scalar columns (id, name_en,
+    price, stock, embedding), never a lazy relationship, so a detached
+    instance is exactly as usable as a session-bound one here."""
+    global _catalog_cache
+    now = time.monotonic()
+    if _catalog_cache is not None and now - _catalog_cache[0] < _CATALOG_CACHE_TTL_SECONDS:
+        return _catalog_cache[1]
+
+    catalog = list((await db.execute(select(Product))).scalars().all())
+    db.expunge_all()
+    _catalog_cache = (now, catalog)
+    return catalog
+
+
 async def run_agent(
     user_message: str, db: AsyncSession, history: list[dict] | None = None
 ) -> AgentResult:
@@ -454,13 +489,13 @@ async def run_agent(
             parsed=parsed,
         )
 
-    catalog = list((await db.execute(select(Product))).scalars().all())
+    catalog = await _load_catalog(db)
 
     query_embeddings: dict[int, tuple[list[float], str, str]] = {}
     if ENABLE_EMBEDDING_MATCH and parsed.ingredients:
         query_embeddings = await _embed_ingredients(parsed.ingredients)
 
-    matches = _match_ingredients(
+    matches = await _match_ingredients(
         parsed.ingredients, catalog, ask_pack_size=(parsed.intent == "add_items"), query_embeddings=query_embeddings
     )
 
