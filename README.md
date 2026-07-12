@@ -23,6 +23,50 @@ An AI-assisted grocery shopping experience for the Bangladeshi market — tell i
 
 <p align="center"><img src="docs/media/mobile_home.gif" alt="The Flutter mobile app running the same Bazar Buddy conversation" width="320"></p>
 
+## Tech stack
+
+**Frontend** — React, TypeScript, Vite, Tailwind CSS, Zustand (state), Framer Motion, installable as a PWA (`vite-plugin-pwa`)
+
+**Mobile** — Flutter/Dart, Provider (state), go_router, Dio (HTTP), `webview_flutter` (SSLCommerz checkout only)
+
+**Backend** — Python, FastAPI (fully async), SQLAlchemy 2.0, Alembic migrations, Pydantic v2, RapidFuzz (fuzzy matching), NumPy (cosine similarity)
+
+**Database & Auth** — Supabase (Postgres + Auth) in production, SQLite locally
+
+**AI / LLM**
+- **Gemini** — primary LLM (intent parsing, ingredient extraction), also the embedding fallback provider
+- **Groq** — automatic LLM fallback on rate limits
+- **Jina AI** (`jina-embeddings-v3`, `jina-reranker-v3`) — primary embedding retrieval + reranking for ingredient matching
+
+**Payments** — SSLCommerz (sandbox) or cash on delivery
+
+**Deployment**
+- Frontend → [Vercel](https://bazar-ai.vercel.app)
+- Backend → [Render](https://bazar-ai.onrender.com)
+- Database + Auth → Supabase
+- Mobile → signed APK on [GitHub Releases](https://github.com/mdshams8067/bazar-ai/releases)
+
+**Ops** — UptimeRobot + GitHub Actions (keep-alive pings), `pytest` + custom live-LLM eval scripts (testing)
+
+## Repo structure
+
+```
+bazar-ai/
+├── backend/          # FastAPI app
+│   ├── agent/        # Bazar Buddy: prompts, pipeline, matcher, substitution logic
+│   ├── core/         # config, DB engine, LLM/embedding clients, auth
+│   ├── models/       # SQLAlchemy models
+│   ├── routers/      # products, cart, orders, chat, payment
+│   ├── seed/         # catalog seeding, label enrichment, embedding backfill
+│   └── alembic/      # migrations
+├── frontend/         # React + Vite + Tailwind PWA
+│   └── src/{api,components,pages,store,types}/
+├── mobile/           # Flutter Android app (second client, same backend)
+│   └── lib/{screens,widgets,providers,services,models}/
+├── scrapper/         # one-off Shwapno.com scraper + transform script
+└── docs/media/       # README screenshots/GIFs
+```
+
 ## Data pipeline
 
 1. **Scrape** — a polite, `robots.txt`-compliant scrape of Shwapno.com, a real Bangladeshi grocery retailer (`scrapper/scraper.py`). Product listings are client-side rendered, so this uses Playwright (headless Chromium) rather than a plain HTTP fetch, scraping category pages via infinite scroll in batches instead of one request per product. Honest `User-Agent`, 2-second minimum delay between page loads, no `/api*` paths or query strings touched.
